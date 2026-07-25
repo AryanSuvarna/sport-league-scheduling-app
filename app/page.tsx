@@ -1,10 +1,11 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 type Availability = {
-  id: number;
-  groundName: string;
+  id: string;
+  venueName: string;
   permitDate: string;
   startTime: string;
   endTime: string;
@@ -12,35 +13,36 @@ type Availability = {
 
 type AvailabilityForm = Omit<Availability, "id">;
 
+type VenueAvailabilityRow = {
+  id: string;
+  venue_name: string;
+  permit_date: string;
+  permit_start_time: string;
+  permit_end_time: string;
+};
+
 const emptyForm: AvailabilityForm = {
-  groundName: "",
+  venueName: "",
   permitDate: "",
   startTime: "",
   endTime: "",
 };
-
-const initialAvailabilities: Availability[] = [
-  {
-    id: 1,
-    groundName: "Central Park Ground",
-    permitDate: "2026-08-01",
-    startTime: "09:00",
-    endTime: "13:00",
-  },
-  {
-    id: 2,
-    groundName: "Lakeside Turf",
-    permitDate: "2026-08-03",
-    startTime: "18:00",
-    endTime: "21:00",
-  },
-];
 
 const dateFormatter = new Intl.DateTimeFormat("en", {
   month: "short",
   day: "numeric",
   year: "numeric",
 });
+
+function mapRowToAvailability(row: VenueAvailabilityRow): Availability {
+  return {
+    id: row.id,
+    venueName: row.venue_name,
+    permitDate: row.permit_date,
+    startTime: row.permit_start_time.slice(0, 5),
+    endTime: row.permit_end_time.slice(0, 5),
+  };
+}
 
 function formatDate(value: string) {
   const date = new Date(`${value}T00:00:00`);
@@ -67,10 +69,13 @@ function formatTime(value: string) {
 }
 
 export default function Home() {
-  const [availabilities, setAvailabilities] = useState(initialAvailabilities);
+  const supabase = useMemo(() => createClient(), []);
+  const [availabilities, setAvailabilities] = useState<Availability[]>([]);
   const [form, setForm] = useState<AvailabilityForm>(emptyForm);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
 
   const sortedAvailabilities = useMemo(
     () =>
@@ -84,6 +89,28 @@ export default function Home() {
   );
 
   const isEditing = editingId !== null;
+  const shouldScrollAvailabilityList = sortedAvailabilities.length > 5;
+
+  const loadAvailabilities = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("venue_availability")
+      .select("id, venue_name, permit_date, permit_start_time, permit_end_time")
+      .order("permit_date", { ascending: true })
+      .order("permit_start_time", { ascending: true });
+
+    if (error) {
+      setMessage(`Could not load availabilities: ${error.message}`);
+      setAvailabilities([]);
+    } else {
+      setAvailabilities((data ?? []).map(mapRowToAvailability));
+    }
+
+    setIsLoading(false);
+  }, [supabase]);
+
+  useEffect(() => {
+    void Promise.resolve().then(loadAvailabilities);
+  }, [loadAvailabilities]);
 
   function updateField(field: keyof AvailabilityForm, value: string) {
     setMessage("");
@@ -98,7 +125,7 @@ export default function Home() {
     setEditingId(null);
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (form.startTime >= form.endTime) {
@@ -106,31 +133,53 @@ export default function Home() {
       return;
     }
 
+    setIsSaving(true);
+
     if (isEditing) {
-      setAvailabilities((currentAvailabilities) =>
-        currentAvailabilities.map((availability) =>
-          availability.id === editingId ? { ...availability, ...form } : availability,
-        ),
-      );
-      setMessage("Availability updated.");
-      resetForm();
+      const { error } = await supabase
+        .from("venue_availability")
+        .update({
+          venue_name: form.venueName.trim(),
+          permit_date: form.permitDate,
+          permit_start_time: form.startTime,
+          permit_end_time: form.endTime,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", editingId);
+
+      if (error) {
+        setMessage(`Could not update availability: ${error.message}`);
+      } else {
+        setMessage("Availability updated.");
+        resetForm();
+        await loadAvailabilities();
+      }
+
+      setIsSaving(false);
       return;
     }
 
-    setAvailabilities((currentAvailabilities) => [
-      ...currentAvailabilities,
-      {
-        id: Date.now(),
-        ...form,
-      },
-    ]);
-    setMessage("Availability added.");
-    resetForm();
+    const { error } = await supabase.from("venue_availability").insert({
+      venue_name: form.venueName.trim(),
+      permit_date: form.permitDate,
+      permit_start_time: form.startTime,
+      permit_end_time: form.endTime,
+    });
+
+    if (error) {
+      setMessage(`Could not add availability: ${error.message}`);
+    } else {
+      setMessage("Availability added.");
+      resetForm();
+      await loadAvailabilities();
+    }
+
+    setIsSaving(false);
   }
 
   function editAvailability(availability: Availability) {
     setForm({
-      groundName: availability.groundName,
+      venueName: availability.venueName,
       permitDate: availability.permitDate,
       startTime: availability.startTime,
       endTime: availability.endTime,
@@ -139,16 +188,21 @@ export default function Home() {
     setMessage("");
   }
 
-  function deleteAvailability(id: number) {
-    setAvailabilities((currentAvailabilities) =>
-      currentAvailabilities.filter((availability) => availability.id !== id),
-    );
+  async function deleteAvailability(id: string) {
+    setMessage("");
+    const { error } = await supabase.from("venue_availability").delete().eq("id", id);
+
+    if (error) {
+      setMessage(`Could not delete availability: ${error.message}`);
+      return;
+    }
 
     if (editingId === id) {
       resetForm();
     }
 
     setMessage("Availability deleted.");
+    await loadAvailabilities();
   }
 
   function finalSubmit() {
@@ -161,15 +215,15 @@ export default function Home() {
         <header className="flex flex-col gap-5 border-b border-[#d6ded5] pb-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-[#637066]">
-              <span>LO Name</span>
+              <span>Aryan Suvarna</span>
               <span aria-hidden="true">/</span>
-              <span>League Name</span>
+              <span>Cricket League - Mississauga</span>
               <span aria-hidden="true">/</span>
-              <span className="text-[#1f5b47]">Ground Availability</span>
+              <span className="text-[#1f5b47]">Venue Availability</span>
             </div>
             <div>
               <h1 className="text-3xl font-semibold tracking-normal text-[#16211b] sm:text-4xl">
-                Ground availability
+                Venue availability
               </h1>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-[#58635c] sm:text-base">
                 Add permit windows for each venue before generating the league schedule.
@@ -196,7 +250,7 @@ export default function Home() {
                   {isEditing ? "Edit availability" : "Add availability"}
                 </h2>
                 <p className="mt-1 text-sm leading-5 text-[#627069]">
-                  Enter the permitted ground, date, and usable time window.
+                  Enter the permitted venue, date, and usable time windows.
                 </p>
               </div>
               {isEditing ? (
@@ -212,10 +266,10 @@ export default function Home() {
 
             <div className="grid gap-4">
               <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
-                Ground name
+                Venue name
                 <input
-                  value={form.groundName}
-                  onChange={(event) => updateField("groundName", event.target.value)}
+                  value={form.venueName}
+                  onChange={(event) => updateField("venueName", event.target.value)}
                   required
                   placeholder="Example: Maple Grove Field"
                   className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
@@ -261,9 +315,10 @@ export default function Home() {
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <button
                 type="submit"
+                disabled={isSaving}
                 className="h-11 rounded-md bg-[#1f5b47] px-5 text-sm font-semibold text-white transition hover:bg-[#164333] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2"
               >
-                {isEditing ? "Save changes" : "Add ground"}
+                {isSaving ? "Saving..." : isEditing ? "Save changes" : "Add venue"}
               </button>
               <button
                 type="button"
@@ -288,15 +343,28 @@ export default function Home() {
                   Existing availabilities
                 </h2>
                 <p className="mt-1 text-sm text-[#627069]">
-                  {availabilities.length} permit window
-                  {availabilities.length === 1 ? "" : "s"} currently added.
+                  {isLoading
+                    ? "Loading permit windows..."
+                    : `${availabilities.length} permit window${
+                        availabilities.length === 1 ? "" : "s"
+                      } currently added.`}
                 </p>
               </div>
             </div>
 
-            <div className="hidden md:block">
+            {!isLoading && availabilities.length === 0 ? (
+              <div className="p-5 text-sm text-[#627069]">
+                No permit windows have been added yet.
+              </div>
+            ) : null}
+
+            <div
+              className={`hidden md:block ${
+                shouldScrollAvailabilityList ? "max-h-[355px] overflow-y-auto" : ""
+              }`}
+            >
               <table className="w-full table-fixed border-collapse text-left">
-                <thead className="bg-[#f2f5f0] text-xs uppercase text-[#5d6b63]">
+                <thead className="sticky top-0 z-10 bg-[#f2f5f0] text-xs uppercase text-[#5d6b63]">
                   <tr>
                     <th className="w-[34%] px-5 py-3 font-semibold">Ground</th>
                     <th className="w-[22%] px-5 py-3 font-semibold">Permit date</th>
@@ -310,7 +378,7 @@ export default function Home() {
                   {sortedAvailabilities.map((availability) => (
                     <tr key={availability.id} className="align-middle">
                       <td className="px-5 py-4 text-sm font-semibold text-[#1f2b24]">
-                        {availability.groundName}
+                        {availability.venueName}
                       </td>
                       <td className="px-5 py-4 text-sm text-[#506057]">
                         {formatDate(availability.permitDate)}
@@ -343,7 +411,11 @@ export default function Home() {
               </table>
             </div>
 
-            <div className="grid gap-3 p-4 md:hidden">
+            <div
+              className={`grid gap-3 p-4 md:hidden ${
+                shouldScrollAvailabilityList ? "max-h-[520px] overflow-y-auto" : ""
+              }`}
+            >
               {sortedAvailabilities.map((availability) => (
                 <article
                   key={availability.id}
@@ -352,7 +424,7 @@ export default function Home() {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <h3 className="text-base font-semibold text-[#1f2b24]">
-                        {availability.groundName}
+                        {availability.venueName}
                       </h3>
                       <p className="mt-1 text-sm text-[#506057]">
                         {formatDate(availability.permitDate)}
