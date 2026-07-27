@@ -129,6 +129,10 @@ export function AvailabilityFormCard({
                           {venue.address}
                         </span>
                       ) : null}
+                      <span className="mt-1 block text-xs text-[#637066]">
+                        {venue.groundType || "Unspecified surface"} · Capacity{" "}
+                        {venue.capacity}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -156,6 +160,10 @@ export function AvailabilityFormCard({
                       {selectedVenue.address}
                     </p>
                   ) : null}
+                  <p className="mt-1 text-xs text-[#637066]">
+                    {selectedVenue.groundType || "Unspecified surface"} · Capacity{" "}
+                    {selectedVenue.capacity}
+                  </p>
                 </div>
                 <div className="flex shrink-0 gap-3">
                   <button

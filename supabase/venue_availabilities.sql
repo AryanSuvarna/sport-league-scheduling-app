@@ -2,9 +2,17 @@ create table if not exists public.venues (
   id uuid primary key default gen_random_uuid(),
   name text not null check (char_length(trim(name)) > 0),
   address text not null default '',
+  ground_type text not null default '',
+  capacity integer not null default 1 check (capacity > 0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.venues
+add column if not exists ground_type text not null default '';
+
+alter table public.venues
+add column if not exists capacity integer not null default 1 check (capacity > 0);
 
 create unique index if not exists venues_name_address_unique_idx
 on public.venues (lower(trim(name)), lower(trim(address)));

@@ -1,13 +1,11 @@
 import { X } from "lucide-react";
+import type { VenueForm } from "../types";
 
 type VenueModalProps = {
-  form: {
-    name: string;
-    address: string;
-  };
+  form: VenueForm;
   isEditing: boolean;
   isSaving: boolean;
-  onChange: (form: { name: string; address: string }) => void;
+  onChange: (form: VenueForm) => void;
   onClose: () => void;
   onSubmit: () => void;
 };
@@ -35,7 +33,7 @@ export function VenueModal({
             </h2>
             <p className="mt-1 text-sm text-[#637066]">
               {isEditing
-                ? "Update the venue name or address."
+                ? "Update the venue details."
                 : "Create a venue, then its default Main field will be selected."}
             </p>
           </div>
@@ -77,6 +75,39 @@ export function VenueModal({
                 })
               }
               placeholder="Street address"
+              className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
+            />
+          </label>
+
+          <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
+            Ground type / sport suitability
+            <input
+              value={form.groundType}
+              onChange={(event) =>
+                onChange({
+                  ...form,
+                  groundType: event.target.value,
+                })
+              }
+              placeholder="Example: Turf, indoor court"
+              className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
+            />
+          </label>
+
+          <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
+            Capacity (how many simultaneous matches can be played)
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={form.capacity}
+              onChange={(event) =>
+                onChange({
+                  ...form,
+                  capacity: event.target.value,
+                })
+              }
+              placeholder="Number of simultaneous matches"
               className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
             />
           </label>

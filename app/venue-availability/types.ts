@@ -41,6 +41,8 @@ export type VenueAvailabilityRow = {
       id: string;
       name: string;
       address: string;
+      ground_type: string;
+      capacity: number;
     } | null;
   } | null;
   permit_date: string;
@@ -68,6 +70,8 @@ export type Venue = {
   id: string;
   name: string;
   address: string;
+  groundType: string;
+  capacity: number;
 };
 
 export type Field = {
@@ -80,6 +84,15 @@ export type VenueRow = {
   id: string;
   name: string;
   address: string;
+  ground_type: string;
+  capacity: number;
+};
+
+export type VenueForm = {
+  name: string;
+  address: string;
+  groundType: string;
+  capacity: string;
 };
 
 export type FieldRow = {

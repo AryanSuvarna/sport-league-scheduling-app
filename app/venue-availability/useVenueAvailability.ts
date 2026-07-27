@@ -17,6 +17,7 @@ import type {
   FieldRow,
   OccurrenceDraft,
   Venue,
+  VenueForm,
   VenueAvailabilityRow,
   VenueRow,
 } from "./types";
@@ -30,6 +31,35 @@ import {
   timeRangesOverlap,
 } from "./utils";
 
+function createEmptyVenueForm(): VenueForm {
+  return {
+    name: "",
+    address: "",
+    groundType: "",
+    capacity: "1",
+  };
+}
+
+function mapVenueRow(row: VenueRow): Venue {
+  return {
+    id: row.id,
+    name: row.name,
+    address: row.address,
+    groundType: row.ground_type,
+    capacity: row.capacity,
+  };
+}
+
+function parseVenueCapacity(value: string) {
+  const capacity = Number(value);
+
+  if (!Number.isInteger(capacity) || capacity < 1) {
+    return null;
+  }
+
+  return capacity;
+}
+
 export function useVenueAvailability() {
   const supabase = useMemo(() => createClient(), []);
   const [availabilities, setAvailabilities] = useState<Availability[]>([]);
@@ -38,7 +68,7 @@ export function useVenueAvailability() {
   const [form, setForm] = useState<AvailabilityForm>(createEmptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingSource, setEditingSource] = useState<Availability | null>(null);
-  const [newVenueForm, setNewVenueForm] = useState({ name: "", address: "" });
+  const [newVenueForm, setNewVenueForm] = useState<VenueForm>(createEmptyVenueForm);
   const [newFieldLabel, setNewFieldLabel] = useState("");
   const [isVenueModalOpen, setIsVenueModalOpen] = useState(false);
   const [editingVenueId, setEditingVenueId] = useState<string | null>(null);
@@ -82,7 +112,8 @@ export function useVenueAvailability() {
       .filter(
         (venue) =>
           venue.name.toLowerCase().includes(query) ||
-          venue.address.toLowerCase().includes(query),
+          venue.address.toLowerCase().includes(query) ||
+          venue.groundType.toLowerCase().includes(query),
       )
       .slice(0, 6);
   }, [form.venueSearch, venues]);
@@ -173,7 +204,7 @@ export function useVenueAvailability() {
         [
           "id",
           "field_id",
-          "fields(id, label, venue_id, venues(id, name, address))",
+          "fields(id, label, venue_id, venues(id, name, address, ground_type, capacity))",
           "permit_date",
           "permit_start_time",
           "permit_end_time",
@@ -200,7 +231,10 @@ export function useVenueAvailability() {
 
   const loadVenueReferences = useCallback(async () => {
     const [venuesResult, fieldsResult] = await Promise.all([
-      supabase.from("venues").select("id, name, address").order("name", { ascending: true }),
+      supabase
+        .from("venues")
+        .select("id, name, address, ground_type, capacity")
+        .order("name", { ascending: true }),
       supabase.from("fields").select("id, venue_id, label").order("label", { ascending: true }),
     ]);
 
@@ -208,7 +242,7 @@ export function useVenueAvailability() {
       setMessage(`Could not load venues: ${venuesResult.error.message}`);
     } else {
       const rows = (venuesResult.data ?? []) as unknown as VenueRow[];
-      setVenues(rows);
+      setVenues(rows.map(mapVenueRow));
     }
 
     if (fieldsResult.error) {
@@ -241,7 +275,7 @@ export function useVenueAvailability() {
 
   function selectVenue(venue: Venue) {
     setMessage("");
-    setNewVenueForm({ name: "", address: "" });
+    setNewVenueForm(createEmptyVenueForm());
     setForm((currentForm) => ({
       ...currentForm,
       venueSearch: venue.name,
@@ -264,6 +298,8 @@ export function useVenueAvailability() {
     setNewVenueForm({
       name: venue.name,
       address: venue.address,
+      groundType: venue.groundType,
+      capacity: String(venue.capacity),
     });
     setIsVenueModalOpen(true);
   }
@@ -271,14 +307,14 @@ export function useVenueAvailability() {
   function closeVenueModal() {
     setIsVenueModalOpen(false);
     setEditingVenueId(null);
-    setNewVenueForm({ name: "", address: "" });
+    setNewVenueForm(createEmptyVenueForm());
   }
 
   function resetForm() {
     setForm(createEmptyForm());
     setEditingId(null);
     setEditingSource(null);
-    setNewVenueForm({ name: "", address: "" });
+    setNewVenueForm(createEmptyVenueForm());
     setEditingVenueId(null);
     setNewFieldLabel("");
   }
@@ -286,9 +322,16 @@ export function useVenueAvailability() {
   async function addVenue() {
     const name = newVenueForm.name.trim() || form.venueSearch.trim();
     const address = newVenueForm.address.trim();
+    const groundType = newVenueForm.groundType.trim();
+    const capacity = parseVenueCapacity(newVenueForm.capacity);
 
     if (!name) {
       setMessage("Venue name is required.");
+      return;
+    }
+
+    if (capacity === null) {
+      setMessage("Venue capacity must be a whole number greater than 0.");
       return;
     }
 
@@ -296,8 +339,8 @@ export function useVenueAvailability() {
 
     const { data: venueData, error: venueError } = await supabase
       .from("venues")
-      .insert({ name, address })
-      .select("id, name, address")
+      .insert({ name, address, ground_type: groundType, capacity })
+      .select("id, name, address, ground_type, capacity")
       .single();
 
     if (venueError) {
@@ -343,7 +386,7 @@ export function useVenueAvailability() {
       selectedVenueId: venue.id,
       fieldId: fieldRows[0]?.id ?? "",
     }));
-    setNewVenueForm({ name: "", address: "" });
+    setNewVenueForm(createEmptyVenueForm());
     setIsVenueModalOpen(false);
     setMessage("Venue added.");
     setIsAddingVenue(false);
@@ -352,9 +395,16 @@ export function useVenueAvailability() {
   async function updateVenue() {
     const name = newVenueForm.name.trim();
     const address = newVenueForm.address.trim();
+    const groundType = newVenueForm.groundType.trim();
+    const capacity = parseVenueCapacity(newVenueForm.capacity);
 
     if (!editingVenueId || !name) {
       setMessage("Venue name is required.");
+      return;
+    }
+
+    if (capacity === null) {
+      setMessage("Venue capacity must be a whole number greater than 0.");
       return;
     }
 
@@ -365,10 +415,12 @@ export function useVenueAvailability() {
       .update({
         name,
         address,
+        ground_type: groundType,
+        capacity,
         updated_at: new Date().toISOString(),
       })
       .eq("id", editingVenueId)
-      .select("id, name, address")
+      .select("id, name, address, ground_type, capacity")
       .single();
 
     if (error) {
