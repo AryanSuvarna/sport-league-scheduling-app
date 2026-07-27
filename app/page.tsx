@@ -25,6 +25,7 @@ type Availability = {
   recurringWeekday: number | null;
   seriesStartDate: string | null;
   seriesEndDate: string | null;
+  isPendingInsert: boolean;
 };
 
 type AvailabilityForm = {
@@ -111,6 +112,7 @@ function mapRowToAvailability(row: VenueAvailabilityRow): Availability {
     recurringWeekday: row.recurring_weekday,
     seriesStartDate: row.series_start_date,
     seriesEndDate: row.series_end_date,
+    isPendingInsert: false,
   };
 }
 
@@ -188,6 +190,20 @@ function sameVenue(firstVenue: string, secondVenue: string) {
   return firstVenue.trim().toLowerCase() === secondVenue.trim().toLowerCase();
 }
 
+function buildInsertRows(availabilitiesToInsert: Availability[]) {
+  return availabilitiesToInsert.map((availability) => ({
+    venue_name: availability.venueName,
+    permit_date: availability.permitDate,
+    permit_start_time: availability.startTime,
+    permit_end_time: availability.endTime,
+    entry_type: availability.entryType,
+    recurring_series_id: availability.recurringSeriesId,
+    recurring_weekday: availability.recurringWeekday,
+    series_start_date: availability.seriesStartDate,
+    series_end_date: availability.seriesEndDate,
+  }));
+}
+
 export default function Home() {
   const supabase = useMemo(() => createClient(), []);
   const [availabilities, setAvailabilities] = useState<Availability[]>([]);
@@ -210,6 +226,10 @@ export default function Home() {
 
         return firstDateTime.localeCompare(secondDateTime);
       }),
+    [availabilities],
+  );
+  const pendingInsertCount = useMemo(
+    () => availabilities.filter((availability) => availability.isPendingInsert).length,
     [availabilities],
   );
 
@@ -286,7 +306,7 @@ export default function Home() {
     )} - ${formatTime(form.endTime)}, through ${formatDate(form.seriesEndDate)}`;
   }, [form.endTime, form.mode, form.recurringWeekday, form.seriesEndDate, form.startTime]);
 
-  const loadAvailabilities = useCallback(async () => {
+  const loadAvailabilities = useCallback(async (preservePendingInserts = true) => {
     const { data, error } = await supabase
       .from("venue_availability")
       .select(
@@ -308,17 +328,28 @@ export default function Home() {
 
     if (error) {
       setMessage(`Could not load availabilities: ${error.message}`);
-      setAvailabilities([]);
+      setAvailabilities((currentAvailabilities) =>
+        preservePendingInserts
+          ? currentAvailabilities.filter((availability) => availability.isPendingInsert)
+          : [],
+      );
     } else {
       const rows = (data ?? []) as unknown as VenueAvailabilityRow[];
-      setAvailabilities(rows.map(mapRowToAvailability));
+      const databaseAvailabilities = rows.map(mapRowToAvailability);
+
+      setAvailabilities((currentAvailabilities) => [
+        ...databaseAvailabilities,
+        ...(preservePendingInserts
+          ? currentAvailabilities.filter((availability) => availability.isPendingInsert)
+          : []),
+      ]);
     }
 
     setIsLoading(false);
   }, [supabase]);
 
   useEffect(() => {
-    void Promise.resolve().then(loadAvailabilities);
+    void Promise.resolve().then(() => loadAvailabilities());
   }, [loadAvailabilities]);
 
   function updateField(field: keyof AvailabilityForm, value: string) {
@@ -431,6 +462,27 @@ export default function Home() {
 
     if (isEditing && editingSource) {
       const occurrence = occurrences[0];
+
+      if (editingSource.isPendingInsert) {
+        setAvailabilities((currentAvailabilities) =>
+          currentAvailabilities.map((availability) =>
+            availability.id === editingId
+              ? {
+                  ...availability,
+                  venueName: occurrence.venueName,
+                  permitDate: occurrence.permitDate,
+                  startTime: occurrence.startTime,
+                  endTime: occurrence.endTime,
+                }
+              : availability,
+          ),
+        );
+        setMessage("Staged availability updated.");
+        resetForm();
+        setIsSaving(false);
+        return;
+      }
+
       const { error } = await supabase
         .from("venue_availability")
         .update({
@@ -460,31 +512,30 @@ export default function Home() {
     }
 
     const recurringSeriesId = form.mode === "recurring" ? crypto.randomUUID() : null;
-    const rows = occurrences.map((occurrence) => ({
-      venue_name: occurrence.venueName,
-      permit_date: occurrence.permitDate,
-      permit_start_time: occurrence.startTime,
-      permit_end_time: occurrence.endTime,
-      entry_type: form.mode,
-      recurring_series_id: recurringSeriesId,
-      recurring_weekday: form.mode === "recurring" ? Number(form.recurringWeekday) : null,
-      series_start_date: form.mode === "recurring" ? form.seriesStartDate : null,
-      series_end_date: form.mode === "recurring" ? form.seriesEndDate : null,
+    const stagedAvailabilities = occurrences.map((occurrence) => ({
+      id: `pending-${crypto.randomUUID()}`,
+      venueName: occurrence.venueName,
+      permitDate: occurrence.permitDate,
+      startTime: occurrence.startTime,
+      endTime: occurrence.endTime,
+      entryType: form.mode,
+      recurringSeriesId,
+      recurringWeekday: form.mode === "recurring" ? Number(form.recurringWeekday) : null,
+      seriesStartDate: form.mode === "recurring" ? form.seriesStartDate : null,
+      seriesEndDate: form.mode === "recurring" ? form.seriesEndDate : null,
+      isPendingInsert: true,
     }));
 
-    const { error } = await supabase.from("venue_availability").insert(rows);
-
-    if (error) {
-      setMessage(`Could not add availability: ${error.message}`);
-    } else {
-      setMessage(
-        form.mode === "recurring"
-          ? `${rows.length} recurring permit occurrences added.`
-          : "Availability added.",
-      );
-      resetForm();
-      await loadAvailabilities();
-    }
+    setAvailabilities((currentAvailabilities) => [
+      ...currentAvailabilities,
+      ...stagedAvailabilities,
+    ]);
+    setMessage(
+      form.mode === "recurring"
+        ? `${stagedAvailabilities.length} recurring permit occurrences staged.`
+        : "Availability staged.",
+    );
+    resetForm();
 
     setIsSaving(false);
   }
@@ -505,6 +556,24 @@ export default function Home() {
 
   async function deleteAvailability(id: string) {
     setMessage("");
+
+    const availability = availabilities.find(
+      (currentAvailability) => currentAvailability.id === id,
+    );
+
+    if (availability?.isPendingInsert) {
+      setAvailabilities((currentAvailabilities) =>
+        currentAvailabilities.filter((currentAvailability) => currentAvailability.id !== id),
+      );
+
+      if (editingId === id) {
+        resetForm();
+      }
+
+      setMessage("Staged availability removed.");
+      return;
+    }
+
     const { error } = await supabase.from("venue_availability").delete().eq("id", id);
 
     if (error) {
@@ -520,8 +589,34 @@ export default function Home() {
     await loadAvailabilities();
   }
 
-  function finalSubmit() {
-    setMessage(`${availabilities.length} availabilities ready for scheduling.`);
+  async function finalSubmit() {
+    const pendingAvailabilities = availabilities.filter(
+      (availability) => availability.isPendingInsert,
+    );
+
+    if (pendingAvailabilities.length === 0) {
+      setMessage("No new staged availabilities to submit.");
+      return;
+    }
+
+    setIsSaving(true);
+    const { error } = await supabase
+      .from("venue_availability")
+      .insert(buildInsertRows(pendingAvailabilities));
+
+    if (error) {
+      setMessage(`Could not submit staged availabilities: ${error.message}`);
+    } else {
+      setMessage(
+        `${pendingAvailabilities.length} staged permit occurrence${
+          pendingAvailabilities.length === 1 ? "" : "s"
+        } submitted.`,
+      );
+      resetForm();
+      await loadAvailabilities(false);
+    }
+
+    setIsSaving(false);
   }
 
   return (
@@ -548,9 +643,10 @@ export default function Home() {
           <button
             type="button"
             onClick={finalSubmit}
-            className="h-11 w-full rounded-md bg-[#1f5b47] px-5 text-sm font-semibold text-white transition hover:bg-[#164333] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2 sm:w-auto"
+            disabled={isSaving || pendingInsertCount === 0}
+            className="h-11 w-full rounded-md bg-[#1f5b47] px-5 text-sm font-semibold text-white transition hover:bg-[#164333] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-[#9aa79f] sm:w-auto"
           >
-            Final submit
+            {isSaving ? "Submitting..." : "Final submit"}
           </button>
         </header>
 
@@ -743,7 +839,7 @@ export default function Home() {
                     ? "Loading permit windows..."
                     : `${availabilities.length} permit occurrence${
                         availabilities.length === 1 ? "" : "s"
-                      } currently added.`}
+                      } listed, ${pendingInsertCount} pending submit.`}
                 </p>
               </div>
             </div>
@@ -772,7 +868,12 @@ export default function Home() {
                     const hasOverlap = overlapIds.has(availability.id);
 
                     return (
-                      <tr key={availability.id} className="align-middle">
+                      <tr
+                        key={availability.id}
+                        className={`align-middle ${
+                          availability.isPendingInsert ? "bg-[#ecf8ed]" : "bg-white"
+                        }`}
+                      >
                         <td className="px-5 py-4 text-sm font-semibold text-[#1f2b24]">
                           <div className="flex flex-col gap-1">
                             {availability.venueName}
@@ -793,12 +894,16 @@ export default function Home() {
                         <td className="px-5 py-4">
                           <span
                             className={`rounded px-2 py-1 text-xs font-semibold ${
-                              availability.entryType === "recurring"
+                              availability.isPendingInsert
+                                ? "bg-[#ccebd1] text-[#235333]"
+                                : availability.entryType === "recurring"
                                 ? "bg-[#eaf0f7] text-[#34506d]"
                                 : "bg-[#edf4ea] text-[#2c5c40]"
                             }`}
                           >
-                            {availability.entryType === "recurring"
+                            {availability.isPendingInsert
+                              ? "New"
+                              : availability.entryType === "recurring"
                               ? "Recurring"
                               : "Single"}
                           </span>
@@ -839,7 +944,11 @@ export default function Home() {
                 return (
                   <article
                     key={availability.id}
-                    className="rounded-lg border border-[#e1e7e2] p-4"
+                    className={`rounded-lg border p-4 ${
+                      availability.isPendingInsert
+                        ? "border-[#b9dfbf] bg-[#ecf8ed]"
+                        : "border-[#e1e7e2] bg-white"
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div>
@@ -856,12 +965,16 @@ export default function Home() {
                         <div className="mt-3 flex flex-wrap gap-2">
                           <span
                             className={`rounded px-2 py-1 text-xs font-semibold ${
-                              availability.entryType === "recurring"
+                              availability.isPendingInsert
+                                ? "bg-[#ccebd1] text-[#235333]"
+                                : availability.entryType === "recurring"
                                 ? "bg-[#eaf0f7] text-[#34506d]"
                                 : "bg-[#edf4ea] text-[#2c5c40]"
                             }`}
                           >
-                            {availability.entryType === "recurring"
+                            {availability.isPendingInsert
+                              ? "New"
+                              : availability.entryType === "recurring"
                               ? "Recurring"
                               : "Single"}
                           </span>
