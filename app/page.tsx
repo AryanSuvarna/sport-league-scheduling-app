@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { Pencil, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 type Availability = {
@@ -392,16 +393,20 @@ export default function Home() {
                           <button
                             type="button"
                             onClick={() => editAvailability(availability)}
-                            className="h-9 rounded-md border border-[#cad4cc] px-3 text-sm font-medium text-[#405047] transition hover:bg-[#f1f4ef]"
+                            aria-label={`Edit ${availability.venueName} availability`}
+                            title="Edit"
+                            className="flex h-9 w-9 items-center justify-center rounded-md border border-[#cad4cc] text-[#405047] transition hover:bg-[#f1f4ef] focus:outline-none focus:ring-2 focus:ring-[#9aa79f] focus:ring-offset-2"
                           >
-                            Edit
+                            <Pencil aria-hidden="true" size={16} strokeWidth={2} />
                           </button>
                           <button
                             type="button"
                             onClick={() => deleteAvailability(availability.id)}
-                            className="h-9 rounded-md border border-[#e3b7ae] px-3 text-sm font-medium text-[#8a3829] transition hover:bg-[#fff1ee]"
+                            aria-label={`Delete ${availability.venueName} availability`}
+                            title="Delete"
+                            className="flex h-9 w-9 items-center justify-center rounded-md border border-[#e3b7ae] text-[#8a3829] transition hover:bg-[#fff1ee] focus:outline-none focus:ring-2 focus:ring-[#d59184] focus:ring-offset-2"
                           >
-                            Delete
+                            <Trash2 aria-hidden="true" size={16} strokeWidth={2} />
                           </button>
                         </div>
                       </td>
@@ -439,16 +444,20 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={() => editAvailability(availability)}
-                      className="h-10 rounded-md border border-[#cad4cc] px-3 text-sm font-medium text-[#405047] transition hover:bg-[#f1f4ef]"
+                      aria-label={`Edit ${availability.venueName} availability`}
+                      title="Edit"
+                      className="flex h-10 items-center justify-center rounded-md border border-[#cad4cc] text-[#405047] transition hover:bg-[#f1f4ef] focus:outline-none focus:ring-2 focus:ring-[#9aa79f] focus:ring-offset-2"
                     >
-                      Edit
+                      <Pencil aria-hidden="true" size={17} strokeWidth={2} />
                     </button>
                     <button
                       type="button"
                       onClick={() => deleteAvailability(availability.id)}
-                      className="h-10 rounded-md border border-[#e3b7ae] px-3 text-sm font-medium text-[#8a3829] transition hover:bg-[#fff1ee]"
+                      aria-label={`Delete ${availability.venueName} availability`}
+                      title="Delete"
+                      className="flex h-10 items-center justify-center rounded-md border border-[#e3b7ae] text-[#8a3829] transition hover:bg-[#fff1ee] focus:outline-none focus:ring-2 focus:ring-[#d59184] focus:ring-offset-2"
                     >
-                      Delete
+                      <Trash2 aria-hidden="true" size={17} strokeWidth={2} />
                     </button>
                   </div>
                 </article>
