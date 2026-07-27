@@ -9,14 +9,18 @@ import {
   useRef,
   useState,
 } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash2, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 type EntryMode = "single" | "recurring";
 
 type Availability = {
   id: string;
+  fieldId: string;
+  venueId: string;
   venueName: string;
+  venueAddress: string;
+  fieldLabel: string;
   permitDate: string;
   startTime: string;
   endTime: string;
@@ -25,12 +29,13 @@ type Availability = {
   recurringWeekday: number | null;
   seriesStartDate: string | null;
   seriesEndDate: string | null;
-  isPendingInsert: boolean;
 };
 
 type AvailabilityForm = {
   mode: EntryMode;
-  venueName: string;
+  venueSearch: string;
+  selectedVenueId: string;
+  fieldId: string;
   permitDate: string;
   recurringWeekday: string;
   seriesStartDate: string;
@@ -41,7 +46,17 @@ type AvailabilityForm = {
 
 type VenueAvailabilityRow = {
   id: string;
-  venue_name: string;
+  field_id: string;
+  fields: {
+    id: string;
+    label: string;
+    venue_id: string;
+    venues: {
+      id: string;
+      name: string;
+      address: string;
+    } | null;
+  } | null;
   permit_date: string;
   permit_start_time: string;
   permit_end_time: string;
@@ -53,10 +68,38 @@ type VenueAvailabilityRow = {
 };
 
 type OccurrenceDraft = {
+  fieldId: string;
+  venueId: string;
   venueName: string;
+  venueAddress: string;
+  fieldLabel: string;
   permitDate: string;
   startTime: string;
   endTime: string;
+};
+
+type Venue = {
+  id: string;
+  name: string;
+  address: string;
+};
+
+type Field = {
+  id: string;
+  venueId: string;
+  label: string;
+};
+
+type VenueRow = {
+  id: string;
+  name: string;
+  address: string;
+};
+
+type FieldRow = {
+  id: string;
+  venue_id: string;
+  label: string;
 };
 
 const seasonEndDate = "";
@@ -90,7 +133,9 @@ function createEmptyForm(): AvailabilityForm {
 
   return {
     mode: "single",
-    venueName: "",
+    venueSearch: "",
+    selectedVenueId: "",
+    fieldId: "",
     permitDate: "",
     recurringWeekday: String(today.getDay()),
     seriesStartDate: toDateInputValue(today),
@@ -101,9 +146,16 @@ function createEmptyForm(): AvailabilityForm {
 }
 
 function mapRowToAvailability(row: VenueAvailabilityRow): Availability {
+  const field = row.fields;
+  const venue = field?.venues;
+
   return {
     id: row.id,
-    venueName: row.venue_name,
+    fieldId: row.field_id,
+    venueId: venue?.id ?? field?.venue_id ?? "",
+    venueName: venue?.name ?? "Unknown venue",
+    venueAddress: venue?.address ?? "",
+    fieldLabel: field?.label ?? "Main",
     permitDate: row.permit_date,
     startTime: row.permit_start_time.slice(0, 5),
     endTime: row.permit_end_time.slice(0, 5),
@@ -112,7 +164,6 @@ function mapRowToAvailability(row: VenueAvailabilityRow): Availability {
     recurringWeekday: row.recurring_weekday,
     seriesStartDate: row.series_start_date,
     seriesEndDate: row.series_end_date,
-    isPendingInsert: false,
   };
 }
 
@@ -186,30 +237,21 @@ function timeRangesOverlap(
   return firstStart < secondEnd && firstEnd > secondStart;
 }
 
-function sameVenue(firstVenue: string, secondVenue: string) {
-  return firstVenue.trim().toLowerCase() === secondVenue.trim().toLowerCase();
-}
-
-function buildInsertRows(availabilitiesToInsert: Availability[]) {
-  return availabilitiesToInsert.map((availability) => ({
-    venue_name: availability.venueName,
-    permit_date: availability.permitDate,
-    permit_start_time: availability.startTime,
-    permit_end_time: availability.endTime,
-    entry_type: availability.entryType,
-    recurring_series_id: availability.recurringSeriesId,
-    recurring_weekday: availability.recurringWeekday,
-    series_start_date: availability.seriesStartDate,
-    series_end_date: availability.seriesEndDate,
-  }));
-}
-
 export default function Home() {
   const supabase = useMemo(() => createClient(), []);
   const [availabilities, setAvailabilities] = useState<Availability[]>([]);
+  const [venues, setVenues] = useState<Venue[]>([]);
+  const [fields, setFields] = useState<Field[]>([]);
   const [form, setForm] = useState<AvailabilityForm>(createEmptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingSource, setEditingSource] = useState<Availability | null>(null);
+  const [newVenueForm, setNewVenueForm] = useState({ name: "", address: "" });
+  const [newFieldLabel, setNewFieldLabel] = useState("");
+  const [isVenueModalOpen, setIsVenueModalOpen] = useState(false);
+  const [editingVenueId, setEditingVenueId] = useState<string | null>(null);
+  const [isFieldModalOpen, setIsFieldModalOpen] = useState(false);
+  const [isAddingVenue, setIsAddingVenue] = useState(false);
+  const [isAddingField, setIsAddingField] = useState(false);
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -228,10 +270,35 @@ export default function Home() {
       }),
     [availabilities],
   );
-  const pendingInsertCount = useMemo(
-    () => availabilities.filter((availability) => availability.isPendingInsert).length,
-    [availabilities],
+  const selectedVenue = useMemo(
+    () => venues.find((venue) => venue.id === form.selectedVenueId) ?? null,
+    [form.selectedVenueId, venues],
   );
+  const selectedVenueFields = useMemo(
+    () => fields.filter((field) => field.venueId === form.selectedVenueId),
+    [fields, form.selectedVenueId],
+  );
+  const matchingVenues = useMemo(() => {
+    const query = form.venueSearch.trim().toLowerCase();
+
+    if (!query) {
+      return [];
+    }
+
+    return venues
+      .filter(
+        (venue) =>
+          venue.name.toLowerCase().includes(query) ||
+          venue.address.toLowerCase().includes(query),
+      )
+      .slice(0, 6);
+  }, [form.venueSearch, venues]);
+  const hasExactVenueMatch = useMemo(() => {
+    const query = form.venueSearch.trim().toLowerCase();
+
+    return venues.some((venue) => venue.name.trim().toLowerCase() === query);
+  }, [form.venueSearch, venues]);
+  const selectedFieldId = form.fieldId || selectedVenueFields[0]?.id || "";
 
   const overlapIds = useMemo(() => {
     const overlappingIds = new Set<string>();
@@ -246,7 +313,7 @@ export default function Home() {
         const second = availabilities[secondIndex];
 
         if (
-          sameVenue(first.venueName, second.venueName) &&
+          first.fieldId === second.fieldId &&
           first.permitDate === second.permitDate &&
           timeRangesOverlap(first.startTime, first.endTime, second.startTime, second.endTime)
         ) {
@@ -306,13 +373,14 @@ export default function Home() {
     )} - ${formatTime(form.endTime)}, through ${formatDate(form.seriesEndDate)}`;
   }, [form.endTime, form.mode, form.recurringWeekday, form.seriesEndDate, form.startTime]);
 
-  const loadAvailabilities = useCallback(async (preservePendingInserts = true) => {
+  const loadAvailabilities = useCallback(async () => {
     const { data, error } = await supabase
       .from("venue_availability")
       .select(
         [
           "id",
-          "venue_name",
+          "field_id",
+          "fields(id, label, venue_id, venues(id, name, address))",
           "permit_date",
           "permit_start_time",
           "permit_end_time",
@@ -328,29 +396,47 @@ export default function Home() {
 
     if (error) {
       setMessage(`Could not load availabilities: ${error.message}`);
-      setAvailabilities((currentAvailabilities) =>
-        preservePendingInserts
-          ? currentAvailabilities.filter((availability) => availability.isPendingInsert)
-          : [],
-      );
+      setAvailabilities([]);
     } else {
       const rows = (data ?? []) as unknown as VenueAvailabilityRow[];
-      const databaseAvailabilities = rows.map(mapRowToAvailability);
-
-      setAvailabilities((currentAvailabilities) => [
-        ...databaseAvailabilities,
-        ...(preservePendingInserts
-          ? currentAvailabilities.filter((availability) => availability.isPendingInsert)
-          : []),
-      ]);
+      setAvailabilities(rows.map(mapRowToAvailability));
     }
 
     setIsLoading(false);
   }, [supabase]);
 
+  const loadVenueReferences = useCallback(async () => {
+    const [venuesResult, fieldsResult] = await Promise.all([
+      supabase.from("venues").select("id, name, address").order("name", { ascending: true }),
+      supabase.from("fields").select("id, venue_id, label").order("label", { ascending: true }),
+    ]);
+
+    if (venuesResult.error) {
+      setMessage(`Could not load venues: ${venuesResult.error.message}`);
+    } else {
+      const rows = (venuesResult.data ?? []) as unknown as VenueRow[];
+      setVenues(rows);
+    }
+
+    if (fieldsResult.error) {
+      setMessage(`Could not load fields: ${fieldsResult.error.message}`);
+    } else {
+      const rows = (fieldsResult.data ?? []) as unknown as FieldRow[];
+      setFields(
+        rows.map((row) => ({
+          id: row.id,
+          venueId: row.venue_id,
+          label: row.label,
+        })),
+      );
+    }
+  }, [supabase]);
+
   useEffect(() => {
-    void Promise.resolve().then(() => loadAvailabilities());
-  }, [loadAvailabilities]);
+    void Promise.resolve().then(() =>
+      Promise.all([loadVenueReferences(), loadAvailabilities()]),
+    );
+  }, [loadAvailabilities, loadVenueReferences]);
 
   function updateField(field: keyof AvailabilityForm, value: string) {
     setMessage("");
@@ -360,13 +446,206 @@ export default function Home() {
     }));
   }
 
+  function selectVenue(venue: Venue) {
+    setMessage("");
+    setNewVenueForm({ name: "", address: "" });
+    setForm((currentForm) => ({
+      ...currentForm,
+      venueSearch: venue.name,
+      selectedVenueId: venue.id,
+      fieldId: "",
+    }));
+  }
+
+  function openAddVenueModal() {
+    setEditingVenueId(null);
+    setNewVenueForm((currentForm) => ({
+      ...currentForm,
+      name: currentForm.name || form.venueSearch.trim(),
+    }));
+    setIsVenueModalOpen(true);
+  }
+
+  function openEditVenueModal(venue: Venue) {
+    setEditingVenueId(venue.id);
+    setNewVenueForm({
+      name: venue.name,
+      address: venue.address,
+    });
+    setIsVenueModalOpen(true);
+  }
+
+  function closeVenueModal() {
+    setIsVenueModalOpen(false);
+    setEditingVenueId(null);
+    setNewVenueForm({ name: "", address: "" });
+  }
+
   function resetForm() {
     setForm(createEmptyForm());
     setEditingId(null);
     setEditingSource(null);
+    setNewVenueForm({ name: "", address: "" });
+    setEditingVenueId(null);
+    setNewFieldLabel("");
+  }
+
+  async function addVenue() {
+    const name = newVenueForm.name.trim() || form.venueSearch.trim();
+    const address = newVenueForm.address.trim();
+
+    if (!name) {
+      setMessage("Venue name is required.");
+      return;
+    }
+
+    setIsAddingVenue(true);
+
+    const { data: venueData, error: venueError } = await supabase
+      .from("venues")
+      .insert({ name, address })
+      .select("id, name, address")
+      .single();
+
+    if (venueError) {
+      setMessage(`Could not add venue: ${venueError.message}`);
+      setIsAddingVenue(false);
+      return;
+    }
+
+    const venue = venueData as unknown as VenueRow;
+    const { data: existingFields, error: existingFieldsError } = await supabase
+      .from("fields")
+      .select("id, venue_id, label")
+      .eq("venue_id", venue.id);
+
+    if (existingFieldsError) {
+      setMessage(`Venue added, but fields could not be loaded: ${existingFieldsError.message}`);
+      setIsAddingVenue(false);
+      return;
+    }
+
+    let fieldRows = (existingFields ?? []) as unknown as FieldRow[];
+
+    if (fieldRows.length === 0) {
+      const { data: fieldData, error: fieldError } = await supabase
+        .from("fields")
+        .insert({ venue_id: venue.id, label: "Main" })
+        .select("id, venue_id, label")
+        .single();
+
+      if (fieldError) {
+        setMessage(`Venue added, but default field could not be created: ${fieldError.message}`);
+        setIsAddingVenue(false);
+        return;
+      }
+
+      fieldRows = [fieldData as unknown as FieldRow];
+    }
+
+    await loadVenueReferences();
+    setForm((currentForm) => ({
+      ...currentForm,
+      venueSearch: venue.name,
+      selectedVenueId: venue.id,
+      fieldId: fieldRows[0]?.id ?? "",
+    }));
+    setNewVenueForm({ name: "", address: "" });
+    setIsVenueModalOpen(false);
+    setMessage("Venue added.");
+    setIsAddingVenue(false);
+  }
+
+  async function updateVenue() {
+    const name = newVenueForm.name.trim();
+    const address = newVenueForm.address.trim();
+
+    if (!editingVenueId || !name) {
+      setMessage("Venue name is required.");
+      return;
+    }
+
+    setIsAddingVenue(true);
+
+    const { data, error } = await supabase
+      .from("venues")
+      .update({
+        name,
+        address,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", editingVenueId)
+      .select("id, name, address")
+      .single();
+
+    if (error) {
+      setMessage(`Could not update venue: ${error.message}`);
+      setIsAddingVenue(false);
+      return;
+    }
+
+    const venue = data as unknown as VenueRow;
+
+    await Promise.all([loadVenueReferences(), loadAvailabilities()]);
+    setForm((currentForm) =>
+      currentForm.selectedVenueId === venue.id
+        ? {
+            ...currentForm,
+            venueSearch: venue.name,
+          }
+        : currentForm,
+    );
+    closeVenueModal();
+    setMessage("Venue updated.");
+    setIsAddingVenue(false);
+  }
+
+  async function addField() {
+    const label = newFieldLabel.trim();
+
+    if (!form.selectedVenueId || !label) {
+      setMessage("Choose a venue and enter a field label.");
+      return;
+    }
+
+    setIsAddingField(true);
+
+    const { data, error } = await supabase
+      .from("fields")
+      .insert({ venue_id: form.selectedVenueId, label })
+      .select("id, venue_id, label")
+      .single();
+
+    if (error) {
+      setMessage(`Could not add field: ${error.message}`);
+      setIsAddingField(false);
+      return;
+    }
+
+    const field = data as unknown as FieldRow;
+
+    await loadVenueReferences();
+    setForm((currentForm) => ({
+      ...currentForm,
+      fieldId: field.id,
+    }));
+    setNewFieldLabel("");
+    setIsFieldModalOpen(false);
+    setMessage("Field added.");
+    setIsAddingField(false);
   }
 
   function validateAndBuildOccurrences() {
+    const selectedField = fields.find((field) => field.id === selectedFieldId) ?? null;
+    const venue = selectedVenue;
+
+    if (!venue || !selectedField) {
+      return {
+        error: "Choose an existing venue and field before adding availability.",
+        occurrences: [],
+      };
+    }
+
     if (form.startTime >= form.endTime) {
       return {
         error: "Permit end time must be after the start time.",
@@ -379,7 +658,11 @@ export default function Home() {
         error: "",
         occurrences: [
           {
-            venueName: form.venueName.trim(),
+            fieldId: selectedField.id,
+            venueId: venue.id,
+            venueName: venue.name,
+            venueAddress: venue.address,
+            fieldLabel: selectedField.label,
             permitDate: form.permitDate,
             startTime: form.startTime,
             endTime: form.endTime,
@@ -411,7 +694,11 @@ export default function Home() {
     return {
       error: "",
       occurrences: recurringDates.map((permitDate) => ({
-        venueName: form.venueName.trim(),
+        fieldId: selectedField.id,
+        venueId: venue.id,
+        venueName: venue.name,
+        venueAddress: venue.address,
+        fieldLabel: selectedField.label,
         permitDate,
         startTime: form.startTime,
         endTime: form.endTime,
@@ -424,7 +711,7 @@ export default function Home() {
       availabilities.some(
         (availability) =>
           availability.id !== editingId &&
-          sameVenue(availability.venueName, occurrence.venueName) &&
+          availability.fieldId === occurrence.fieldId &&
           availability.permitDate === occurrence.permitDate &&
           timeRangesOverlap(
             availability.startTime,
@@ -463,29 +750,10 @@ export default function Home() {
     if (isEditing && editingSource) {
       const occurrence = occurrences[0];
 
-      if (editingSource.isPendingInsert) {
-        setAvailabilities((currentAvailabilities) =>
-          currentAvailabilities.map((availability) =>
-            availability.id === editingId
-              ? {
-                  ...availability,
-                  venueName: occurrence.venueName,
-                  permitDate: occurrence.permitDate,
-                  startTime: occurrence.startTime,
-                  endTime: occurrence.endTime,
-                }
-              : availability,
-          ),
-        );
-        setMessage("Staged availability updated.");
-        resetForm();
-        setIsSaving(false);
-        return;
-      }
-
       const { error } = await supabase
         .from("venue_availability")
         .update({
+          field_id: occurrence.fieldId,
           venue_name: occurrence.venueName,
           permit_date: occurrence.permitDate,
           permit_start_time: occurrence.startTime,
@@ -512,30 +780,32 @@ export default function Home() {
     }
 
     const recurringSeriesId = form.mode === "recurring" ? crypto.randomUUID() : null;
-    const stagedAvailabilities = occurrences.map((occurrence) => ({
-      id: `pending-${crypto.randomUUID()}`,
-      venueName: occurrence.venueName,
-      permitDate: occurrence.permitDate,
-      startTime: occurrence.startTime,
-      endTime: occurrence.endTime,
-      entryType: form.mode,
-      recurringSeriesId,
-      recurringWeekday: form.mode === "recurring" ? Number(form.recurringWeekday) : null,
-      seriesStartDate: form.mode === "recurring" ? form.seriesStartDate : null,
-      seriesEndDate: form.mode === "recurring" ? form.seriesEndDate : null,
-      isPendingInsert: true,
+    const rows = occurrences.map((occurrence) => ({
+      field_id: occurrence.fieldId,
+      venue_name: occurrence.venueName,
+      permit_date: occurrence.permitDate,
+      permit_start_time: occurrence.startTime,
+      permit_end_time: occurrence.endTime,
+      entry_type: form.mode,
+      recurring_series_id: recurringSeriesId,
+      recurring_weekday: form.mode === "recurring" ? Number(form.recurringWeekday) : null,
+      series_start_date: form.mode === "recurring" ? form.seriesStartDate : null,
+      series_end_date: form.mode === "recurring" ? form.seriesEndDate : null,
     }));
 
-    setAvailabilities((currentAvailabilities) => [
-      ...currentAvailabilities,
-      ...stagedAvailabilities,
-    ]);
-    setMessage(
-      form.mode === "recurring"
-        ? `${stagedAvailabilities.length} recurring permit occurrences staged.`
-        : "Availability staged.",
-    );
-    resetForm();
+    const { error } = await supabase.from("venue_availability").insert(rows);
+
+    if (error) {
+      setMessage(`Could not add availability: ${error.message}`);
+    } else {
+      setMessage(
+        form.mode === "recurring"
+          ? `${rows.length} recurring permit occurrences added.`
+          : "Availability added.",
+      );
+      resetForm();
+      await loadAvailabilities();
+    }
 
     setIsSaving(false);
   }
@@ -544,7 +814,9 @@ export default function Home() {
     setForm((currentForm) => ({
       ...currentForm,
       mode: "single",
-      venueName: availability.venueName,
+      venueSearch: availability.venueName,
+      selectedVenueId: availability.venueId,
+      fieldId: availability.fieldId,
       permitDate: availability.permitDate,
       startTime: availability.startTime,
       endTime: availability.endTime,
@@ -556,23 +828,6 @@ export default function Home() {
 
   async function deleteAvailability(id: string) {
     setMessage("");
-
-    const availability = availabilities.find(
-      (currentAvailability) => currentAvailability.id === id,
-    );
-
-    if (availability?.isPendingInsert) {
-      setAvailabilities((currentAvailabilities) =>
-        currentAvailabilities.filter((currentAvailability) => currentAvailability.id !== id),
-      );
-
-      if (editingId === id) {
-        resetForm();
-      }
-
-      setMessage("Staged availability removed.");
-      return;
-    }
 
     const { error } = await supabase.from("venue_availability").delete().eq("id", id);
 
@@ -589,34 +844,8 @@ export default function Home() {
     await loadAvailabilities();
   }
 
-  async function finalSubmit() {
-    const pendingAvailabilities = availabilities.filter(
-      (availability) => availability.isPendingInsert,
-    );
-
-    if (pendingAvailabilities.length === 0) {
-      setMessage("No new staged availabilities to submit.");
-      return;
-    }
-
-    setIsSaving(true);
-    const { error } = await supabase
-      .from("venue_availability")
-      .insert(buildInsertRows(pendingAvailabilities));
-
-    if (error) {
-      setMessage(`Could not submit staged availabilities: ${error.message}`);
-    } else {
-      setMessage(
-        `${pendingAvailabilities.length} staged permit occurrence${
-          pendingAvailabilities.length === 1 ? "" : "s"
-        } submitted.`,
-      );
-      resetForm();
-      await loadAvailabilities(false);
-    }
-
-    setIsSaving(false);
+  function finalSubmit() {
+    setMessage(`${availabilities.length} availabilities ready for scheduling.`);
   }
 
   return (
@@ -643,10 +872,9 @@ export default function Home() {
           <button
             type="button"
             onClick={finalSubmit}
-            disabled={isSaving || pendingInsertCount === 0}
-            className="h-11 w-full rounded-md bg-[#1f5b47] px-5 text-sm font-semibold text-white transition hover:bg-[#164333] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-[#9aa79f] sm:w-auto"
+            className="h-11 w-full rounded-md bg-[#1f5b47] px-5 text-sm font-semibold text-white transition hover:bg-[#164333] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2 sm:w-auto"
           >
-            {isSaving ? "Submitting..." : "Final submit"}
+            Final submit
           </button>
         </header>
 
@@ -696,16 +924,128 @@ export default function Home() {
                 </div>
               ) : null}
 
-              <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
-                Venue name
-                <input
-                  value={form.venueName}
-                  onChange={(event) => updateField("venueName", event.target.value)}
-                  required
-                  placeholder="Example: Maple Grove Field"
-                  className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
-                />
-              </label>
+              <div className="relative grid gap-2">
+                <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
+                  Venue
+                  <input
+                    value={form.venueSearch}
+                    onChange={(event) =>
+                      setForm((currentForm) => ({
+                        ...currentForm,
+                        venueSearch: event.target.value,
+                        selectedVenueId: "",
+                        fieldId: "",
+                      }))
+                    }
+                    required
+                    placeholder="Search venues"
+                    className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
+                  />
+                </label>
+
+                {!selectedVenue && (matchingVenues.length > 0 || form.venueSearch.trim()) ? (
+                  <div className="absolute left-0 right-0 top-full z-20 mt-2 rounded-md border border-[#dce5dd] bg-white p-2 shadow-lg">
+                    {matchingVenues.length > 0 ? (
+                      <div className="grid gap-1">
+                        {matchingVenues.map((venue) => (
+                          <button
+                            key={venue.id}
+                            type="button"
+                            onClick={() => selectVenue(venue)}
+                            className="rounded px-3 py-2 text-left text-sm transition hover:bg-[#edf4ea]"
+                          >
+                            <span className="block font-semibold text-[#1f2b24]">
+                              {venue.name}
+                            </span>
+                            {venue.address ? (
+                              <span className="block text-xs text-[#637066]">
+                                {venue.address}
+                              </span>
+                            ) : null}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {form.venueSearch.trim() && !hasExactVenueMatch ? (
+                      <div className="mt-2 border-t border-[#e1e7e2] pt-2">
+                        <button
+                          type="button"
+                          onClick={openAddVenueModal}
+                          className="w-full rounded px-3 py-2 text-left text-sm font-semibold text-[#1f5b47] transition hover:bg-[#edf4ea]"
+                        >
+                          + Add new venue
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : selectedVenue ? (
+                  <div className="rounded-md border border-[#cfe0d2] bg-[#ecf8ed] px-3 py-2 text-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-[#1f2b24]">{selectedVenue.name}</p>
+                        {selectedVenue.address ? (
+                          <p className="mt-0.5 text-xs text-[#637066]">
+                            {selectedVenue.address}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="flex shrink-0 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => openEditVenueModal(selectedVenue)}
+                          className="text-xs font-semibold text-[#1f5b47] hover:text-[#164333]"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setForm((currentForm) => ({
+                              ...currentForm,
+                              venueSearch: "",
+                              selectedVenueId: "",
+                              fieldId: "",
+                            }))
+                          }
+                          className="text-xs font-semibold text-[#1f5b47] hover:text-[#164333]"
+                        >
+                          Change
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              {selectedVenue ? (
+                <div className="grid gap-2">
+                  {selectedVenueFields.length > 0 ? (
+                    <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
+                      Field
+                      <select
+                        value={selectedFieldId}
+                        onChange={(event) => updateField("fieldId", event.target.value)}
+                        required
+                        className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
+                      >
+                        {selectedVenueFields.map((field) => (
+                          <option key={field.id} value={field.id}>
+                            {field.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => setIsFieldModalOpen(true)}
+                    className="h-10 rounded-md border border-[#cad4cc] px-4 text-sm font-semibold text-[#1f5b47] transition hover:bg-[#f1f4ef]"
+                  >
+                    + Add new field
+                  </button>
+                </div>
+              ) : null}
 
               {form.mode === "single" ? (
                 <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
@@ -839,7 +1179,7 @@ export default function Home() {
                     ? "Loading permit windows..."
                     : `${availabilities.length} permit occurrence${
                         availabilities.length === 1 ? "" : "s"
-                      } listed, ${pendingInsertCount} pending submit.`}
+                      } currently added.`}
                 </p>
               </div>
             </div>
@@ -854,7 +1194,7 @@ export default function Home() {
               <table className="w-full table-fixed border-collapse text-left">
                 <thead className="sticky top-0 z-10 bg-[#f2f5f0] text-xs uppercase text-[#5d6b63]">
                   <tr>
-                    <th className="w-[28%] px-5 py-3 font-semibold">Venue</th>
+                    <th className="w-[28%] px-5 py-3 font-semibold">Venue / Field</th>
                     <th className="w-[18%] px-5 py-3 font-semibold">Date</th>
                     <th className="w-[22%] px-5 py-3 font-semibold">Time</th>
                     <th className="w-[16%] px-5 py-3 font-semibold">Source</th>
@@ -868,15 +1208,13 @@ export default function Home() {
                     const hasOverlap = overlapIds.has(availability.id);
 
                     return (
-                      <tr
-                        key={availability.id}
-                        className={`align-middle ${
-                          availability.isPendingInsert ? "bg-[#ecf8ed]" : "bg-white"
-                        }`}
-                      >
+                      <tr key={availability.id} className="align-middle">
                         <td className="px-5 py-4 text-sm font-semibold text-[#1f2b24]">
                           <div className="flex flex-col gap-1">
                             {availability.venueName}
+                            <span className="text-xs font-medium text-[#637066]">
+                              {availability.fieldLabel}
+                            </span>
                             {hasOverlap ? (
                               <span className="w-fit rounded bg-[#fff1ee] px-2 py-0.5 text-xs font-semibold text-[#8a3829]">
                                 Overlap
@@ -894,16 +1232,12 @@ export default function Home() {
                         <td className="px-5 py-4">
                           <span
                             className={`rounded px-2 py-1 text-xs font-semibold ${
-                              availability.isPendingInsert
-                                ? "bg-[#ccebd1] text-[#235333]"
-                                : availability.entryType === "recurring"
+                              availability.entryType === "recurring"
                                 ? "bg-[#eaf0f7] text-[#34506d]"
                                 : "bg-[#edf4ea] text-[#2c5c40]"
                             }`}
                           >
-                            {availability.isPendingInsert
-                              ? "New"
-                              : availability.entryType === "recurring"
+                            {availability.entryType === "recurring"
                               ? "Recurring"
                               : "Single"}
                           </span>
@@ -944,17 +1278,16 @@ export default function Home() {
                 return (
                   <article
                     key={availability.id}
-                    className={`rounded-lg border p-4 ${
-                      availability.isPendingInsert
-                        ? "border-[#b9dfbf] bg-[#ecf8ed]"
-                        : "border-[#e1e7e2] bg-white"
-                    }`}
+                    className="rounded-lg border border-[#e1e7e2] bg-white p-4"
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <h3 className="text-base font-semibold text-[#1f2b24]">
                           {availability.venueName}
                         </h3>
+                        <p className="mt-1 text-sm font-medium text-[#405047]">
+                          {availability.fieldLabel}
+                        </p>
                         <p className="mt-1 text-sm text-[#506057]">
                           {formatDate(availability.permitDate)}
                         </p>
@@ -965,16 +1298,12 @@ export default function Home() {
                         <div className="mt-3 flex flex-wrap gap-2">
                           <span
                             className={`rounded px-2 py-1 text-xs font-semibold ${
-                              availability.isPendingInsert
-                                ? "bg-[#ccebd1] text-[#235333]"
-                                : availability.entryType === "recurring"
+                              availability.entryType === "recurring"
                                 ? "bg-[#eaf0f7] text-[#34506d]"
                                 : "bg-[#edf4ea] text-[#2c5c40]"
                             }`}
                           >
-                            {availability.isPendingInsert
-                              ? "New"
-                              : availability.entryType === "recurring"
+                            {availability.entryType === "recurring"
                               ? "Recurring"
                               : "Single"}
                           </span>
@@ -1013,6 +1342,156 @@ export default function Home() {
           </section>
         </section>
       </div>
+
+      {isVenueModalOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#16211b]/45 px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="venue-modal-title"
+        >
+          <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <h2 id="venue-modal-title" className="text-lg font-semibold text-[#16211b]">
+                  {editingVenueId ? "Edit venue" : "Add new venue"}
+                </h2>
+                <p className="mt-1 text-sm text-[#637066]">
+                  {editingVenueId
+                    ? "Update the venue name or address."
+                    : "Create a venue, then its default Main field will be selected."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeVenueModal}
+                aria-label="Close venue modal"
+                title="Close"
+                className="flex h-9 w-9 items-center justify-center rounded-md border border-[#cad4cc] text-[#405047] transition hover:bg-[#f1f4ef]"
+              >
+                <X aria-hidden="true" size={16} strokeWidth={2} />
+              </button>
+            </div>
+
+            <div className="grid gap-4">
+              <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
+                Venue name
+                <input
+                  value={newVenueForm.name}
+                  onChange={(event) =>
+                    setNewVenueForm((currentForm) => ({
+                      ...currentForm,
+                      name: event.target.value,
+                    }))
+                  }
+                  placeholder="Example: Riverside Park"
+                  className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
+                />
+              </label>
+
+              <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
+                Address
+                <input
+                  value={newVenueForm.address}
+                  onChange={(event) =>
+                    setNewVenueForm((currentForm) => ({
+                      ...currentForm,
+                      address: event.target.value,
+                    }))
+                  }
+                  placeholder="Street address"
+                  className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
+                />
+              </label>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeVenueModal}
+                className="h-10 rounded-md border border-[#cad4cc] px-4 text-sm font-semibold text-[#405047] transition hover:bg-[#f1f4ef]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={editingVenueId ? updateVenue : addVenue}
+                disabled={isAddingVenue}
+                className="h-10 rounded-md bg-[#1f5b47] px-4 text-sm font-semibold text-white transition hover:bg-[#164333] disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
+              >
+                {isAddingVenue
+                  ? editingVenueId
+                    ? "Saving..."
+                    : "Adding..."
+                  : editingVenueId
+                    ? "Save venue"
+                    : "Add venue"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isFieldModalOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#16211b]/45 px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="add-field-title"
+        >
+          <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <h2 id="add-field-title" className="text-lg font-semibold text-[#16211b]">
+                  Add new field
+                </h2>
+                <p className="mt-1 text-sm text-[#637066]">
+                  {selectedVenue
+                    ? `Add a field for ${selectedVenue.name}.`
+                    : "Choose a venue before adding a field."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsFieldModalOpen(false)}
+                aria-label="Close add field"
+                title="Close"
+                className="flex h-9 w-9 items-center justify-center rounded-md border border-[#cad4cc] text-[#405047] transition hover:bg-[#f1f4ef]"
+              >
+                <X aria-hidden="true" size={16} strokeWidth={2} />
+              </button>
+            </div>
+
+            <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
+              Field label
+              <input
+                value={newFieldLabel}
+                onChange={(event) => setNewFieldLabel(event.target.value)}
+                placeholder="Example: Field 3"
+                className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
+              />
+            </label>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsFieldModalOpen(false)}
+                className="h-10 rounded-md border border-[#cad4cc] px-4 text-sm font-semibold text-[#405047] transition hover:bg-[#f1f4ef]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={addField}
+                disabled={isAddingField}
+                className="h-10 rounded-md bg-[#1f5b47] px-4 text-sm font-semibold text-white transition hover:bg-[#164333] disabled:cursor-not-allowed disabled:bg-[#9aa79f]"
+              >
+                {isAddingField ? "Adding..." : "Add field"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
