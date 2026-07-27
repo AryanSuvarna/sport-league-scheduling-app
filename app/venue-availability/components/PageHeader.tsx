@@ -22,13 +22,13 @@ export function PageHeader({ onFinalSubmit }: PageHeaderProps) {
           </p>
         </div>
       </div>
-      <button
+      {/* <button
         type="button"
         onClick={onFinalSubmit}
         className="h-11 w-full rounded-md bg-[#1f5b47] px-5 text-sm font-semibold text-white transition hover:bg-[#164333] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2 sm:w-auto"
       >
         Final submit
-      </button>
+      </button> */}
     </header>
   );
 }
