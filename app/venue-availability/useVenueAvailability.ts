@@ -60,6 +60,16 @@ function parseVenueCapacity(value: string) {
   return capacity;
 }
 
+function parseAvailabilityCapacity(value: string) {
+  const capacity = Number(value);
+
+  if (!Number.isInteger(capacity) || capacity < 1) {
+    return null;
+  }
+
+  return capacity;
+}
+
 export function useVenueAvailability() {
   const supabase = useMemo(() => createClient(), []);
   const [availabilities, setAvailabilities] = useState<Availability[]>([]);
@@ -205,6 +215,7 @@ export function useVenueAvailability() {
           "id",
           "field_id",
           "fields(id, label, venue_id, venues(id, name, address, ground_type, capacity))",
+          "capacity",
           "permit_date",
           "permit_start_time",
           "permit_end_time",
@@ -281,6 +292,7 @@ export function useVenueAvailability() {
       venueSearch: venue.name,
       selectedVenueId: venue.id,
       fieldId: "",
+      capacity: String(venue.capacity),
     }));
   }
 
@@ -385,6 +397,7 @@ export function useVenueAvailability() {
       venueSearch: venue.name,
       selectedVenueId: venue.id,
       fieldId: fieldRows[0]?.id ?? "",
+      capacity: String(venue.capacity),
     }));
     setNewVenueForm(createEmptyVenueForm());
     setIsVenueModalOpen(false);
@@ -483,10 +496,18 @@ export function useVenueAvailability() {
   function validateAndBuildOccurrences() {
     const selectedField = fields.find((field) => field.id === selectedFieldId) ?? null;
     const venue = selectedVenue;
+    const capacity = parseAvailabilityCapacity(form.capacity);
 
     if (!venue || !selectedField) {
       return {
         error: "Choose an existing venue and field before adding availability.",
+        occurrences: [],
+      };
+    }
+
+    if (capacity === null) {
+      return {
+        error: "Permit capacity must be a whole number greater than 0.",
         occurrences: [],
       };
     }
@@ -508,6 +529,7 @@ export function useVenueAvailability() {
             venueName: venue.name,
             venueAddress: venue.address,
             fieldLabel: selectedField.label,
+            capacity,
             permitDate: form.permitDate,
             startTime: form.startTime,
             endTime: form.endTime,
@@ -544,6 +566,7 @@ export function useVenueAvailability() {
         venueName: venue.name,
         venueAddress: venue.address,
         fieldLabel: selectedField.label,
+        capacity,
         permitDate,
         startTime: form.startTime,
         endTime: form.endTime,
@@ -600,6 +623,7 @@ export function useVenueAvailability() {
         .update({
           field_id: occurrence.fieldId,
           venue_name: occurrence.venueName,
+          capacity: occurrence.capacity,
           permit_date: occurrence.permitDate,
           permit_start_time: occurrence.startTime,
           permit_end_time: occurrence.endTime,
@@ -628,6 +652,7 @@ export function useVenueAvailability() {
     const rows = occurrences.map((occurrence) => ({
       field_id: occurrence.fieldId,
       venue_name: occurrence.venueName,
+      capacity: occurrence.capacity,
       permit_date: occurrence.permitDate,
       permit_start_time: occurrence.startTime,
       permit_end_time: occurrence.endTime,
@@ -662,6 +687,7 @@ export function useVenueAvailability() {
       venueSearch: availability.venueName,
       selectedVenueId: availability.venueId,
       fieldId: availability.fieldId,
+      capacity: String(availability.capacity),
       permitDate: availability.permitDate,
       startTime: availability.startTime,
       endTime: availability.endTime,

@@ -55,6 +55,7 @@ create table if not exists public.venue_availability (
   permit_date date not null,
   permit_start_time time not null,
   permit_end_time time not null,
+  capacity integer not null default 1 check (capacity > 0),
   entry_type text not null default 'single' check (entry_type in ('single', 'recurring')),
   recurring_series_id uuid,
   recurring_weekday smallint check (recurring_weekday between 0 and 6),
@@ -80,6 +81,9 @@ alter column venue_name drop not null;
 
 alter table public.venue_availability
 add column if not exists field_id uuid references public.fields (id);
+
+alter table public.venue_availability
+add column if not exists capacity integer not null default 1 check (capacity > 0);
 
 insert into public.venues (name, address)
 select distinct trim(venue_name), ''

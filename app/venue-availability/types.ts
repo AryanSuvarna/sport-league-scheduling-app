@@ -7,6 +7,7 @@ export type Availability = {
   venueName: string;
   venueAddress: string;
   fieldLabel: string;
+  capacity: number;
   permitDate: string;
   startTime: string;
   endTime: string;
@@ -22,6 +23,7 @@ export type AvailabilityForm = {
   venueSearch: string;
   selectedVenueId: string;
   fieldId: string;
+  capacity: string;
   permitDate: string;
   recurringWeekday: string;
   seriesStartDate: string;
@@ -45,6 +47,7 @@ export type VenueAvailabilityRow = {
       capacity: number;
     } | null;
   } | null;
+  capacity: number;
   permit_date: string;
   permit_start_time: string;
   permit_end_time: string;
@@ -61,6 +64,7 @@ export type OccurrenceDraft = {
   venueName: string;
   venueAddress: string;
   fieldLabel: string;
+  capacity: number;
   permitDate: string;
   startTime: string;
   endTime: string;

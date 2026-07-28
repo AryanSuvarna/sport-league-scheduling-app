@@ -71,6 +71,9 @@ export function AvailabilityList({
                       <span className="text-xs font-medium text-[#637066]">
                         {availability.fieldLabel}
                       </span>
+                      <span className="text-xs font-medium text-[#637066]">
+                        Capacity {availability.capacity}
+                      </span>
                       {hasOverlap ? (
                         <span className="w-fit rounded bg-[#fff1ee] px-2 py-0.5 text-xs font-semibold text-[#8a3829]">
                           Overlap
@@ -141,6 +144,9 @@ export function AvailabilityList({
                   </h3>
                   <p className="mt-1 text-sm font-medium text-[#405047]">
                     {availability.fieldLabel}
+                  </p>
+                  <p className="mt-1 text-sm text-[#506057]">
+                    Capacity {availability.capacity}
                   </p>
                   <p className="mt-1 text-sm text-[#506057]">
                     {formatDate(availability.permitDate)}
