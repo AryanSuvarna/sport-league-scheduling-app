@@ -560,11 +560,6 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
               label="Match duration"
               value={`${editableLeague.matchDurationMinutes || 0} min`}
             />
-            <SummaryMetric
-              icon={CalendarRange}
-              label="Weekly max"
-              value={editableLeague.maxMatchesPerTeamPerWeek || 0}
-            />
             <SummaryMetric icon={ListChecks} label="Rules" value={rules.length} />
           </aside>
         </section>
