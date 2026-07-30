@@ -9,15 +9,26 @@ import {
   CalendarRange,
   Clock3,
   ListChecks,
+  MessageCircle,
   Pencil,
+  Plus,
   Trash2,
   Users,
 } from "lucide-react";
-import { formatSeason, type League } from "@/lib/leagues";
+import { formatSeason, type League, type LeagueTeam } from "@/lib/leagues";
 import { createClient } from "@/lib/supabase/client";
 
 type LeagueDetailClientProps = {
   league: League;
+};
+
+type EditableTeam = {
+  id: string;
+  name: string;
+  captainName: string;
+  captainPhone: string;
+  captainEmail: string;
+  isNew: boolean;
 };
 
 export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
@@ -25,6 +36,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [message, setMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [removedTeamIds, setRemovedTeamIds] = useState<string[]>([]);
   const [editableLeague, setEditableLeague] = useState({
     name: league.name,
     sport: league.sport,
@@ -34,6 +46,9 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
     maxMatchesPerTeamPerWeek: String(league.max_matches_per_team_per_week),
     rules: league.match_rules.join("\n"),
   });
+  const [editableTeams, setEditableTeams] = useState<EditableTeam[]>(
+    league.league_teams.map(formatEditableTeam),
+  );
 
   const rules = useMemo(
     () =>
@@ -56,6 +71,52 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
       ...currentLeague,
       [name]: value,
     }));
+  }
+
+  function updateTeam(teamId: string, field: keyof Omit<EditableTeam, "id" | "isNew">, value: string) {
+    setMessage("");
+    setEditableTeams((currentTeams) =>
+      currentTeams.map((team) =>
+        team.id === teamId
+          ? {
+              ...team,
+              [field]: value,
+            }
+          : team,
+      ),
+    );
+  }
+
+  function addTeam() {
+    setMessage("");
+    setEditableTeams((currentTeams) => [
+      ...currentTeams,
+      {
+        id: `new-${Date.now()}`,
+        name: "",
+        captainName: "",
+        captainPhone: "",
+        captainEmail: "",
+        isNew: true,
+      },
+    ]);
+  }
+
+  function removeTeam(teamId: string) {
+    setMessage("");
+    setEditableTeams((currentTeams) => {
+      const teamToRemove = currentTeams.find((team) => team.id === teamId);
+
+      if (currentTeams.length === 1 || !teamToRemove) {
+        return currentTeams;
+      }
+
+      if (!teamToRemove.isNew) {
+        setRemovedTeamIds((currentIds) => [...currentIds, teamId]);
+      }
+
+      return currentTeams.filter((team) => team.id !== teamId);
+    });
   }
 
   async function saveLeague() {
@@ -84,10 +145,46 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
       return;
     }
 
+    const completeTeams = editableTeams.filter(
+      (team) => team.name.trim() && team.captainName.trim() && team.captainPhone.trim(),
+    );
+
+    if (completeTeams.length < 2) {
+      setMessage("Add at least two complete teams.");
+      return;
+    }
+
+    const hasIncompleteTeam = editableTeams.some((team) => {
+      const hasAnyTeamValue =
+        team.name.trim() ||
+        team.captainName.trim() ||
+        team.captainPhone.trim() ||
+        team.captainEmail.trim();
+
+      return (
+        hasAnyTeamValue &&
+        (!team.name.trim() || !team.captainName.trim() || !team.captainPhone.trim())
+      );
+    });
+
+    if (hasIncompleteTeam) {
+      setMessage("Each started team needs a team name, captain name, and captain phone.");
+      return;
+    }
+
+    const hasInvalidEmail = editableTeams.some(
+      (team) => team.captainEmail.trim() && !team.captainEmail.includes("@"),
+    );
+
+    if (hasInvalidEmail) {
+      setMessage("Optional captain emails need to be valid email addresses.");
+      return;
+    }
+
     setIsSaving(true);
 
     const supabase = createClient();
-    const { error } = await supabase
+    const { error: leagueError } = await supabase
       .from("leagues")
       .update({
         name: editableLeague.name.trim(),
@@ -100,13 +197,75 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
       })
       .eq("id", league.id);
 
-    setIsSaving(false);
-
-    if (error) {
-      setMessage(error.message);
+    if (leagueError) {
+      setIsSaving(false);
+      setMessage(leagueError.message);
       return;
     }
 
+    const existingTeamUpdates = editableTeams
+      .filter((team) => !team.isNew)
+      .map((team) =>
+        supabase
+          .from("league_teams")
+          .update({
+            name: team.name.trim(),
+            captain_name: team.captainName.trim(),
+            captain_phone: team.captainPhone.trim(),
+            captain_email: team.captainEmail.trim() || null,
+          })
+          .eq("id", team.id),
+      );
+    const teamUpdateResults = await Promise.all(existingTeamUpdates);
+    const teamUpdateError = teamUpdateResults.find((result) => result.error)?.error;
+
+    if (teamUpdateError) {
+      setIsSaving(false);
+      setMessage(teamUpdateError.message);
+      return;
+    }
+
+    const newTeams = editableTeams.filter((team) => team.isNew);
+
+    if (newTeams.length > 0) {
+      const { error: insertTeamsError } = await supabase.from("league_teams").insert(
+        newTeams.map((team) => ({
+          league_id: league.id,
+          name: team.name.trim(),
+          captain_name: team.captainName.trim(),
+          captain_phone: team.captainPhone.trim(),
+          captain_email: team.captainEmail.trim() || null,
+        })),
+      );
+
+      if (insertTeamsError) {
+        setIsSaving(false);
+        setMessage(insertTeamsError.message);
+        return;
+      }
+    }
+
+    if (removedTeamIds.length > 0) {
+      const { error: deleteTeamsError } = await supabase
+        .from("league_teams")
+        .delete()
+        .in("id", removedTeamIds);
+
+      if (deleteTeamsError) {
+        setIsSaving(false);
+        setMessage(deleteTeamsError.message);
+        return;
+      }
+    }
+
+    setIsSaving(false);
+    setRemovedTeamIds([]);
+    setEditableTeams((currentTeams) =>
+      currentTeams.map((team) => ({
+        ...team,
+        isNew: false,
+      })),
+    );
     setIsEditing(false);
     setMessage("League updated.");
     router.refresh();
@@ -153,6 +312,13 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row">
+              <Link
+                href="/venue-availability"
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#1f5b47] px-5 text-sm font-semibold text-white transition hover:bg-[#164333] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2"
+              >
+                Add venue availability
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
               <button
                 type="button"
                 onClick={() => setIsEditing((currentValue) => !currentValue)}
@@ -237,6 +403,85 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
                     />
                   </label>
                 </div>
+
+                <section className="mt-5 rounded-md border border-[#d6ded5] bg-[#fbfcfa] p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h3 className="text-base font-semibold text-[#18211c]">Teams</h3>
+                      <p className="mt-1 text-sm text-[#637066]">
+                        Captain name and phone number are required.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addTeam}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-[#c7d3ca] bg-white px-4 text-sm font-semibold text-[#1f5b47] transition hover:border-[#9fb5a8] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2"
+                    >
+                      <Plus className="h-4 w-4" aria-hidden="true" />
+                      Add team
+                    </button>
+                  </div>
+
+                  <div className="mt-4 space-y-4">
+                    {editableTeams.map((team, index) => (
+                      <div
+                        key={team.id}
+                        className="rounded-md border border-[#d6ded5] bg-white p-4"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <h4 className="text-sm font-semibold text-[#18211c]">
+                            Team {index + 1}
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => removeTeam(team.id)}
+                            disabled={editableTeams.length === 1}
+                            aria-label={`Remove team ${index + 1}`}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[#d7ded7] text-[#637066] transition hover:border-[#b6c5bb] hover:text-[#9a3d31] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Trash2 className="h-4 w-4" aria-hidden="true" />
+                          </button>
+                        </div>
+
+                        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                          <EditField
+                            label="Team name"
+                            name="name"
+                            value={team.name}
+                            onChange={(event) =>
+                              updateTeam(team.id, "name", event.target.value)
+                            }
+                          />
+                          <EditField
+                            label="Team captain name"
+                            name="captainName"
+                            value={team.captainName}
+                            onChange={(event) =>
+                              updateTeam(team.id, "captainName", event.target.value)
+                            }
+                          />
+                          <EditField
+                            label="Team captain phone number"
+                            name="captainPhone"
+                            value={team.captainPhone}
+                            onChange={(event) =>
+                              updateTeam(team.id, "captainPhone", event.target.value)
+                            }
+                          />
+                          <EditField
+                            label="Team captain email"
+                            name="captainEmail"
+                            value={team.captainEmail}
+                            onChange={(event) =>
+                              updateTeam(team.id, "captainEmail", event.target.value)
+                            }
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
                 <button
                   type="button"
                   onClick={saveLeague}
@@ -248,46 +493,68 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
               </section>
             ) : null}
 
-            <section className="rounded-md border border-[#d6ded5] bg-white p-5 shadow-sm">
-              <h2 className="text-lg font-semibold text-[#18211c]">Teams</h2>
-              <div className="mt-4 grid gap-3">
-                {league.league_teams.map((team) => (
-                  <article
-                    key={team.id}
-                    className="rounded-md border border-[#e1e7e0] bg-[#fbfcfa] p-4"
-                  >
-                    <h3 className="text-sm font-semibold text-[#18211c]">{team.name}</h3>
-                    <div className="mt-3 grid gap-2 text-sm text-[#637066] sm:grid-cols-3">
-                      <p>{team.captain_name}</p>
-                      <p>{team.captain_phone}</p>
-                      <p>{team.captain_email || "No email"}</p>
+            {!isEditing ? (
+              <>
+                <section className="rounded-md border border-[#d6ded5] bg-white p-5 shadow-sm">
+                  <h2 className="text-lg font-semibold text-[#18211c]">Teams</h2>
+                  <div className="mt-4 overflow-hidden rounded-md border border-[#e1e7e0]">
+                    <div className="hidden grid-cols-[1.2fr_1fr_1.2fr_150px] gap-3 border-b border-[#e1e7e0] bg-[#fbfcfa] px-4 py-3 text-xs font-semibold uppercase text-[#637066] md:grid">
+                      <span>Team</span>
+                      <span>Phone number</span>
+                      <span>Email</span>
+                      <span>Send invite for availability</span>
                     </div>
-                  </article>
-                ))}
-              </div>
-            </section>
+                    {editableTeams.map((team) => (
+                      <div
+                        key={team.id}
+                        className="grid gap-3 border-b border-[#e1e7e0] bg-white px-4 py-4 last:border-b-0 md:grid-cols-[1.2fr_1fr_1.2fr_150px] md:items-center"
+                      >
+                        <TeamCell label="Team" value={team.name} detail={team.captainName} />
+                        <TeamCell label="Phone number" value={team.captainPhone} />
+                        <TeamCell label="Email" value={team.captainEmail || "No email"} />
+                        <div>
+                          <span className="mb-1 block text-xs font-semibold uppercase text-[#637066] md:hidden">
+                            Send invite for availability
+                          </span>
+                          <Link
+                            href={buildWhatsAppInviteUrl(team, editableLeague.name)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-[#c7d3ca] bg-white px-4 text-sm font-semibold text-[#1f5b47] transition hover:border-[#9fb5a8] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2"
+                          >
+                            <MessageCircle className="h-4 w-4" aria-hidden="true" />
+                            Invite
+                          </Link>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
 
-            <section className="rounded-md border border-[#d6ded5] bg-white p-5 shadow-sm">
-              <h2 className="text-lg font-semibold text-[#18211c]">Match rules</h2>
-              {rules.length > 0 ? (
-                <ul className="mt-4 space-y-2">
-                  {rules.map((rule) => (
-                    <li
-                      key={rule}
-                      className="rounded-md border border-[#e1e7e0] bg-[#fbfcfa] px-3 py-2 text-sm text-[#39433d]"
-                    >
-                      {rule}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-4 text-sm text-[#637066]">No match rules added.</p>
-              )}
-            </section>
+                <section className="rounded-md border border-[#d6ded5] bg-white p-5 shadow-sm">
+                  <h2 className="text-lg font-semibold text-[#18211c]">Match rules</h2>
+                  {rules.length > 0 ? (
+                    <ul className="mt-4 space-y-2">
+                      {rules.map((rule) => (
+                        <li
+                          key={rule}
+                          className="rounded-md border border-[#e1e7e0] bg-[#fbfcfa] px-3 py-2 text-sm text-[#39433d]"
+                        >
+                          {rule}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-4 text-sm text-[#637066]">No match rules added.</p>
+                  )}
+                </section>
+              </>
+            ) : null}
           </div>
 
           <aside className="space-y-4">
-            <SummaryMetric icon={Users} label="Teams" value={league.league_teams.length} />
+            <SummaryMetric icon={Users} label="Teams" value={editableTeams.length} />
+            <SummaryMetric icon={CalendarRange} label="Season" value={seasonLabel} />
             <SummaryMetric
               icon={Clock3}
               label="Match duration"
@@ -299,17 +566,48 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
               value={editableLeague.maxMatchesPerTeamPerWeek || 0}
             />
             <SummaryMetric icon={ListChecks} label="Rules" value={rules.length} />
-            <Link
-              href="/venue-availability"
-              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[#1f5b47] px-5 text-sm font-semibold text-white transition hover:bg-[#164333] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2"
-            >
-              Add venue availability
-              <ArrowRight className="h-4 w-4" aria-hidden="true" />
-            </Link>
           </aside>
         </section>
       </div>
     </main>
+  );
+}
+
+function formatEditableTeam(team: LeagueTeam): EditableTeam {
+  return {
+    id: team.id,
+    name: team.name,
+    captainName: team.captain_name,
+    captainPhone: team.captain_phone,
+    captainEmail: team.captain_email || "",
+    isNew: false,
+  };
+}
+
+function buildWhatsAppInviteUrl(team: EditableTeam, leagueName: string) {
+  const phoneNumber = team.captainPhone.replace(/\D/g, "");
+  const message = `Hi ${team.captainName}, please submit your team availability for ${leagueName}.`;
+
+  return `https://wa.me/${phoneNumber}?text=${encodeURIComponent(message)}`;
+}
+
+function TeamCell({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <span className="mb-1 block text-xs font-semibold uppercase text-[#637066] md:hidden">
+        {label}
+      </span>
+      <p className="truncate text-sm font-semibold text-[#18211c]">{value}</p>
+      {detail ? <p className="mt-1 truncate text-sm text-[#637066]">{detail}</p> : null}
+    </div>
   );
 }
 
