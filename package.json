@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "whatsapp:create-template": "node --env-file=.env.local scripts/create-whatsapp-template.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

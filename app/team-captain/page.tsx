@@ -77,6 +77,21 @@ const initialForm: TeamCaptainForm = {
   notes: "",
 };
 
+function getInitialForm() {
+  if (typeof window === "undefined") {
+    return initialForm;
+  }
+
+  const searchParams = new URLSearchParams(window.location.search);
+
+  return {
+    ...initialForm,
+    teamName: searchParams.get("team") || "",
+    captainName: searchParams.get("captain") || "",
+    captainEmail: searchParams.get("email") || "",
+  };
+}
+
 function compactDates(dates: string[]) {
   return dates.filter(Boolean);
 }
@@ -89,7 +104,7 @@ function isInsideSeason(date: string, league: League | null) {
 
 export default function TeamCaptainPage() {
   const supabase = useMemo(() => createClient(), []);
-  const [form, setForm] = useState<TeamCaptainForm>(initialForm);
+  const [form, setForm] = useState<TeamCaptainForm>(getInitialForm);
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [isSaving, setIsSaving] = useState(false);

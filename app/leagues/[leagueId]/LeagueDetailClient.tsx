@@ -36,6 +36,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [message, setMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [sendingInviteTeamId, setSendingInviteTeamId] = useState<string | null>(null);
   const [removedTeamIds, setRemovedTeamIds] = useState<string[]>([]);
   const [editableLeague, setEditableLeague] = useState({
     name: league.name,
@@ -288,6 +289,39 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
     router.refresh();
   }
 
+  async function sendWhatsAppInvite(team: EditableTeam) {
+    setMessage("");
+    setSendingInviteTeamId(team.id);
+
+    try {
+      const response = await fetch("/api/whatsapp/invite", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          captainName: team.captainName,
+          captainPhone: team.captainPhone,
+          captainEmail: team.captainEmail,
+          teamName: team.name,
+          leagueName: editableLeague.name,
+        }),
+      });
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        setMessage(result?.error || "Could not send WhatsApp invite.");
+        return;
+      }
+
+      setMessage(`WhatsApp invite sent to ${team.captainName}.`);
+    } catch {
+      setMessage("Could not reach the WhatsApp invite endpoint.");
+    } finally {
+      setSendingInviteTeamId(null);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[#f6f7f4] text-[#18211c]">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 px-4 py-6 sm:px-6 lg:px-8">
@@ -516,15 +550,15 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
                           <span className="mb-1 block text-xs font-semibold uppercase text-[#637066] md:hidden">
                             Send invite for availability
                           </span>
-                          <Link
-                            href={buildWhatsAppInviteUrl(team, editableLeague.name)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-[#c7d3ca] bg-white px-4 text-sm font-semibold text-[#1f5b47] transition hover:border-[#9fb5a8] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2"
+                          <button
+                            type="button"
+                            onClick={() => sendWhatsAppInvite(team)}
+                            disabled={sendingInviteTeamId === team.id}
+                            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-[#c7d3ca] bg-white px-4 text-sm font-semibold text-[#1f5b47] transition hover:border-[#9fb5a8] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             <MessageCircle className="h-4 w-4" aria-hidden="true" />
-                            Invite
-                          </Link>
+                            {sendingInviteTeamId === team.id ? "Sending..." : "Invite"}
+                          </button>
                         </div>
                       </div>
                     ))}
@@ -577,13 +611,6 @@ function formatEditableTeam(team: LeagueTeam): EditableTeam {
     captainEmail: team.captain_email || "",
     isNew: false,
   };
-}
-
-function buildWhatsAppInviteUrl(team: EditableTeam, leagueName: string) {
-  const phoneNumber = team.captainPhone.replace(/\D/g, "");
-  const message = `Hi ${team.captainName}, please submit your team availability for ${leagueName}.`;
-
-  return `https://wa.me/${phoneNumber}?text=${encodeURIComponent(message)}`;
 }
 
 function TeamCell({
