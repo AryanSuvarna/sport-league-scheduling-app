@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 type InviteRequestBody = {
   captainName?: string;
   captainPhone?: string;
-  captainEmail?: string;
+  leagueId?: string;
+  teamId?: string;
   teamName?: string;
   leagueName?: string;
 };
@@ -46,21 +47,21 @@ export async function POST(request: NextRequest) {
 
   const captainName = body.captainName?.trim();
   const captainPhone = normalizePhoneNumber(body.captainPhone || "");
-  const captainEmail = body.captainEmail?.trim() || "";
+  const leagueId = body.leagueId?.trim();
+  const teamId = body.teamId?.trim();
   const teamName = body.teamName?.trim();
   const leagueName = body.leagueName?.trim();
 
-  if (!captainName || !captainPhone || !teamName || !leagueName) {
+  if (!captainName || !captainPhone || !leagueId || !teamId || !teamName || !leagueName) {
     return NextResponse.json(
-      { error: "Captain name, phone, team name, and league name are required." },
+      { error: "Captain name, phone, league ID, team ID, team name, and league name are required." },
       { status: 400 },
     );
   }
 
   const inviteUrl = buildInviteUrl(request, {
-    captainName,
-    captainEmail,
-    teamName,
+    leagueId,
+    teamId,
   });
   const apiVersion =
     process.env.WHATSAPP_API_VERSION || process.env.WHATSAPP_GRAPH_API_VERSION || "v25.0";
@@ -78,7 +79,7 @@ export async function POST(request: NextRequest) {
       },
       body: JSON.stringify({
         messaging_product: "whatsapp",
-        to: captainPhone,
+        to: `1${captainPhone}`,
         type: "template",
         template: {
           name: templateName,
@@ -125,9 +126,8 @@ function normalizePhoneNumber(phoneNumber: string) {
 function buildInviteUrl(
   request: NextRequest,
   params: {
-    captainName: string;
-    captainEmail: string;
-    teamName: string;
+    leagueId: string;
+    teamId: string;
   },
 ) {
   const baseUrl =
@@ -136,12 +136,8 @@ function buildInviteUrl(
     request.nextUrl.origin;
   const inviteUrl = new URL("/team-captain", baseUrl);
 
-  inviteUrl.searchParams.set("team", params.teamName);
-  inviteUrl.searchParams.set("captain", params.captainName);
-
-  if (params.captainEmail) {
-    inviteUrl.searchParams.set("email", params.captainEmail);
-  }
+  inviteUrl.searchParams.set("leagueId", params.leagueId);
+  inviteUrl.searchParams.set("teamId", params.teamId);
 
   return inviteUrl.toString();
 }

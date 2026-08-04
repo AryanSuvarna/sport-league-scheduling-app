@@ -1,6 +1,12 @@
 "use client";
 
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   CalendarCheck,
   CalendarDays,
@@ -86,9 +92,8 @@ function getInitialForm() {
 
   return {
     ...initialForm,
-    teamName: searchParams.get("team") || "",
-    captainName: searchParams.get("captain") || "",
-    captainEmail: searchParams.get("email") || "",
+    leagueId: searchParams.get("leagueId") || "",
+    teamId: searchParams.get("teamId") || "",
   };
 }
 
@@ -102,6 +107,23 @@ function isInsideSeason(date: string, league: League | null) {
   );
 }
 
+function subscribeToLocation() {
+  return () => {};
+}
+
+function getInviteLockSnapshot() {
+  if (typeof window === "undefined") {
+    return true;
+  }
+
+  const searchParams = new URLSearchParams(window.location.search);
+  return Boolean(searchParams.get("leagueId") && searchParams.get("teamId"));
+}
+
+function getInviteLockServerSnapshot() {
+  return true;
+}
+
 export default function TeamCaptainPage() {
   const supabase = useMemo(() => createClient(), []);
   const [form, setForm] = useState<TeamCaptainForm>(getInitialForm);
@@ -110,6 +132,11 @@ export default function TeamCaptainPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [leagues, setLeagues] = useState<League[]>([]);
   const [isLoadingLeagues, setIsLoadingLeagues] = useState(true);
+  const isInviteLink = useSyncExternalStore(
+    subscribeToLocation,
+    getInviteLockSnapshot,
+    getInviteLockServerSnapshot,
+  );
 
   const availableDates = compactDates(form.availableDates);
   const blackoutDates = compactDates(form.blackoutDates);
@@ -324,7 +351,11 @@ export default function TeamCaptainPage() {
       return;
     }
 
-    setForm(initialForm);
+    setForm((currentForm) =>
+      isInviteLink
+        ? { ...initialForm, leagueId: currentForm.leagueId, teamId: currentForm.teamId }
+        : initialForm,
+    );
     setMessageTone("success");
     setMessage("Availability submitted.");
     setIsSaving(false);
@@ -374,7 +405,8 @@ export default function TeamCaptainPage() {
                     }))
                   }
                   required
-                  className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
+                  disabled={isInviteLink}
+                  className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20 disabled:cursor-not-allowed disabled:bg-[#f1f4ef] disabled:text-[#58635c]"
                 >
                   <option value="">{isLoadingLeagues ? "Loading leagues..." : "Choose a league"}</option>
                   {leagues.map((league) => (
@@ -391,8 +423,8 @@ export default function TeamCaptainPage() {
                   value={form.teamId}
                   onChange={(event) => updateField("teamId", event.target.value)}
                   required
-                  disabled={!selectedLeague}
-                  className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
+                  disabled={!selectedLeague || isInviteLink}
+                  className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20 disabled:cursor-not-allowed disabled:bg-[#f1f4ef] disabled:text-[#58635c]"
                 >
                   <option value="">{selectedLeague ? "Choose your team" : "Choose a league first"}</option>
                   {selectedLeague?.league_teams.map((team) => (
@@ -640,7 +672,11 @@ export default function TeamCaptainPage() {
             <button
               type="button"
               onClick={() => {
-                setForm(initialForm);
+                setForm((currentForm) =>
+                  isInviteLink
+                    ? { ...initialForm, leagueId: currentForm.leagueId, teamId: currentForm.teamId }
+                    : initialForm,
+                );
                 setMessage("");
                 setMessageTone("success");
               }}

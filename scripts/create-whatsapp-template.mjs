@@ -40,7 +40,7 @@ const response = await fetch(
                 "Jordan",
                 "Mississauga Strikers",
                 "Cricket League - Mississauga",
-                "https://example.com/team-captain?team=Mississauga%20Strikers",
+                "https://example.com/team-captain?leagueId=league-id&teamId=team-id",
               ],
             ],
           },

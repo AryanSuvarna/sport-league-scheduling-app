@@ -302,7 +302,8 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
         body: JSON.stringify({
           captainName: team.captainName,
           captainPhone: team.captainPhone,
-          captainEmail: team.captainEmail,
+          leagueId: league.id,
+          teamId: team.id,
           teamName: team.name,
           leagueName: editableLeague.name,
         }),
