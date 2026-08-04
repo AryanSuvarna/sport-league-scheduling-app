@@ -2,6 +2,7 @@ export type EntryMode = "single" | "recurring";
 
 export type Availability = {
   id: string;
+  leagueId: string;
   fieldId: string;
   venueId: string;
   venueName: string;
@@ -34,6 +35,7 @@ export type AvailabilityForm = {
 
 export type VenueAvailabilityRow = {
   id: string;
+  league_id: string;
   field_id: string;
   fields: {
     id: string;
@@ -96,7 +98,6 @@ export type VenueForm = {
   name: string;
   address: string;
   groundType: string;
-  capacity: string;
 };
 
 export type FieldRow = {

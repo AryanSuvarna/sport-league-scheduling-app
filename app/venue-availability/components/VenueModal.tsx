@@ -94,23 +94,6 @@ export function VenueModal({
             />
           </label>
 
-          <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
-            Capacity (how many simultaneous matches can be played)
-            <input
-              type="number"
-              min="1"
-              step="1"
-              value={form.capacity}
-              onChange={(event) =>
-                onChange({
-                  ...form,
-                  capacity: event.target.value,
-                })
-              }
-              placeholder="Number of simultaneous matches"
-              className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
-            />
-          </label>
         </div>
 
         <div className="mt-6 flex justify-end gap-3">

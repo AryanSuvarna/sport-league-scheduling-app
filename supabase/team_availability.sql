@@ -1,16 +1,8 @@
+-- Availability is submitted for a registered team. Records are retained as
+-- submission history; the scheduler selects the most recent one per team.
 create table if not exists public.team_availability_submissions (
   id uuid primary key default gen_random_uuid(),
-  team_name text not null constraint team_availability_team_name_required
-    check (char_length(trim(team_name)) > 0),
-  captain_name text not null constraint team_availability_captain_name_required
-    check (char_length(trim(captain_name)) > 0),
-  captain_email text not null constraint team_availability_captain_email_valid
-    check (
-      char_length(trim(captain_email)) > 3
-      and position('@' in captain_email) > 1
-    ),
-  season_start_date date not null,
-  season_end_date date not null,
+  team_id uuid not null references public.league_teams (id) on delete cascade,
   available_start_date date,
   available_end_date date,
   available_dates date[] not null default '{}',
@@ -22,8 +14,6 @@ create table if not exists public.team_availability_submissions (
   notes text not null default '',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint team_availability_season_range_check
-    check (season_end_date >= season_start_date),
   constraint team_availability_required_availability_check
     check (
       (
@@ -34,181 +24,64 @@ create table if not exists public.team_availability_submissions (
       or cardinality(available_dates) > 0
     ),
   constraint team_availability_preferred_days_values_check
-    check (
-      preferred_days_of_week
-      <@ array[
-        'Sunday',
-        'Monday',
-        'Tuesday',
-        'Wednesday',
-        'Thursday',
-        'Friday',
-        'Saturday'
-      ]::text[]
-    ),
+    check (preferred_days_of_week <@ array['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']::text[]),
   constraint team_availability_day_preference_check
-    check (
-      (
-        has_day_preference = true
-        and cardinality(preferred_days_of_week) > 0
-      )
-      or (
-        has_day_preference = false
-        and cardinality(preferred_days_of_week) = 0
-      )
-    ),
+    check ((has_day_preference and cardinality(preferred_days_of_week) > 0) or (not has_day_preference and cardinality(preferred_days_of_week) = 0)),
   constraint team_availability_preferred_times_values_check
-    check (
-      preferred_times_of_day
-      <@ array['Morning', 'Afternoon', 'Evening']::text[]
-    ),
+    check (preferred_times_of_day <@ array['Morning', 'Afternoon', 'Evening']::text[]),
   constraint team_availability_time_preference_check
-    check (
-      (
-        has_time_preference = true
-        and cardinality(preferred_times_of_day) > 0
-      )
-      or (
-        has_time_preference = false
-        and cardinality(preferred_times_of_day) = 0
-      )
-    )
+    check ((has_time_preference and cardinality(preferred_times_of_day) > 0) or (not has_time_preference and cardinality(preferred_times_of_day) = 0))
 );
 
-alter table public.team_availability_submissions
-add column if not exists season_start_date date not null default '2026-05-01';
+-- Existing submissions cannot be safely associated with a team ID, so the
+-- selected migration strategy is to clear the legacy shape exactly once.
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'team_availability_submissions'
+      and column_name = 'team_name'
+  ) then
+    delete from public.team_availability_submissions;
+  end if;
+end;
+$$;
 
 alter table public.team_availability_submissions
-add column if not exists season_end_date date not null default '2026-09-30';
+  add column if not exists team_id uuid references public.league_teams (id) on delete cascade;
 
 alter table public.team_availability_submissions
-add column if not exists has_day_preference boolean not null default false;
+  alter column team_id set not null;
 
 alter table public.team_availability_submissions
-add column if not exists preferred_days_of_week text[] not null default '{}';
+  drop column if exists team_name,
+  drop column if exists captain_name,
+  drop column if exists captain_email,
+  drop column if exists season_start_date,
+  drop column if exists season_end_date,
+  drop column if exists preferred_dates;
 
 alter table public.team_availability_submissions
-add column if not exists has_time_preference boolean not null default false;
+  drop constraint if exists team_availability_season_range_check,
+  drop constraint if exists team_availability_submissions_preferred_times_of_day_check,
+  drop constraint if exists team_availability_submissions_preferred_times_of_day_check1,
+  drop constraint if exists team_availability_submissions_preferred_dates_check;
 
-alter table public.team_availability_submissions
-alter column preferred_times_of_day set default '{}';
-
-alter table public.team_availability_submissions
-drop column if exists preferred_dates;
-
-alter table public.team_availability_submissions
-drop constraint if exists team_availability_submissions_preferred_times_of_day_check;
-
-alter table public.team_availability_submissions
-drop constraint if exists team_availability_submissions_preferred_times_of_day_check1;
-
-alter table public.team_availability_submissions
-drop constraint if exists team_availability_submissions_preferred_dates_check;
-
-update public.team_availability_submissions
-set has_time_preference = cardinality(preferred_times_of_day) > 0;
-
-update public.team_availability_submissions
-set has_day_preference = cardinality(preferred_days_of_week) > 0;
-
-alter table public.team_availability_submissions
-drop constraint if exists team_availability_required_availability_check;
-
-alter table public.team_availability_submissions
-add constraint team_availability_required_availability_check
-check (
-  (
-    available_start_date is not null
-    and available_end_date is not null
-    and available_end_date >= available_start_date
-  )
-  or cardinality(available_dates) > 0
-);
-
-alter table public.team_availability_submissions
-drop constraint if exists team_availability_season_range_check;
-
-alter table public.team_availability_submissions
-add constraint team_availability_season_range_check
-check (season_end_date >= season_start_date);
-
-alter table public.team_availability_submissions
-drop constraint if exists team_availability_preferred_days_values_check;
-
-alter table public.team_availability_submissions
-add constraint team_availability_preferred_days_values_check
-check (
-  preferred_days_of_week
-  <@ array[
-    'Sunday',
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday',
-    'Friday',
-    'Saturday'
-  ]::text[]
-);
-
-alter table public.team_availability_submissions
-drop constraint if exists team_availability_day_preference_check;
-
-alter table public.team_availability_submissions
-add constraint team_availability_day_preference_check
-check (
-  (
-    has_day_preference = true
-    and cardinality(preferred_days_of_week) > 0
-  )
-  or (
-    has_day_preference = false
-    and cardinality(preferred_days_of_week) = 0
-  )
-);
-
-alter table public.team_availability_submissions
-drop constraint if exists team_availability_preferred_times_values_check;
-
-alter table public.team_availability_submissions
-add constraint team_availability_preferred_times_values_check
-check (
-  preferred_times_of_day
-  <@ array['Morning', 'Afternoon', 'Evening']::text[]
-);
-
-alter table public.team_availability_submissions
-drop constraint if exists team_availability_time_preference_check;
-
-alter table public.team_availability_submissions
-add constraint team_availability_time_preference_check
-check (
-  (
-    has_time_preference = true
-    and cardinality(preferred_times_of_day) > 0
-  )
-  or (
-    has_time_preference = false
-    and cardinality(preferred_times_of_day) = 0
-  )
-);
-
-grant insert
-on table public.team_availability_submissions
-to anon, authenticated;
+grant select, insert on table public.team_availability_submissions to anon, authenticated;
 
 alter table public.team_availability_submissions enable row level security;
 
-drop policy if exists "Captains can submit team availability"
-on public.team_availability_submissions;
+drop policy if exists "Captains can submit team availability" on public.team_availability_submissions;
+drop policy if exists "Anyone can view team availability" on public.team_availability_submissions;
 
 create policy "Captains can submit team availability"
-on public.team_availability_submissions
-for insert
-to anon, authenticated
-with check (true);
+on public.team_availability_submissions for insert to anon, authenticated with check (true);
 
-create index if not exists team_availability_team_name_idx
-on public.team_availability_submissions (lower(trim(team_name)));
+create policy "Anyone can view team availability"
+on public.team_availability_submissions for select to anon, authenticated using (true);
 
-create index if not exists team_availability_created_at_idx
-on public.team_availability_submissions (created_at desc);
+drop index if exists public.team_availability_team_name_idx;
+create index if not exists team_availability_team_created_at_idx
+on public.team_availability_submissions (team_id, created_at desc);

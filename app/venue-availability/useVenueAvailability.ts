@@ -36,7 +36,6 @@ function createEmptyVenueForm(): VenueForm {
     name: "",
     address: "",
     groundType: "",
-    capacity: "1",
   };
 }
 
@@ -50,16 +49,6 @@ function mapVenueRow(row: VenueRow): Venue {
   };
 }
 
-function parseVenueCapacity(value: string) {
-  const capacity = Number(value);
-
-  if (!Number.isInteger(capacity) || capacity < 1) {
-    return null;
-  }
-
-  return capacity;
-}
-
 function parseAvailabilityCapacity(value: string) {
   const capacity = Number(value);
 
@@ -70,11 +59,19 @@ function parseAvailabilityCapacity(value: string) {
   return capacity;
 }
 
+type LeagueOption = {
+  id: string;
+  name: string;
+  sport: string;
+};
+
 export function useVenueAvailability() {
   const supabase = useMemo(() => createClient(), []);
   const [availabilities, setAvailabilities] = useState<Availability[]>([]);
   const [venues, setVenues] = useState<Venue[]>([]);
   const [fields, setFields] = useState<Field[]>([]);
+  const [leagues, setLeagues] = useState<LeagueOption[]>([]);
+  const [selectedLeagueId, setSelectedLeagueId] = useState("");
   const [form, setForm] = useState<AvailabilityForm>(createEmptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingSource, setEditingSource] = useState<Availability | null>(null);
@@ -208,11 +205,18 @@ export function useVenueAvailability() {
   }, [form.endTime, form.mode, form.recurringWeekday, form.seriesEndDate, form.startTime]);
 
   const loadAvailabilities = useCallback(async () => {
+    if (!selectedLeagueId) {
+      setAvailabilities([]);
+      setIsLoading(false);
+      return;
+    }
+
     const { data, error } = await supabase
       .from("venue_availability")
       .select(
         [
           "id",
+          "league_id",
           "field_id",
           "fields(id, label, venue_id, venues(id, name, address, ground_type, capacity))",
           "capacity",
@@ -226,6 +230,7 @@ export function useVenueAvailability() {
           "series_end_date",
         ].join(", "),
       )
+      .eq("league_id", selectedLeagueId)
       .order("permit_date", { ascending: true })
       .order("permit_start_time", { ascending: true });
 
@@ -238,6 +243,20 @@ export function useVenueAvailability() {
     }
 
     setIsLoading(false);
+  }, [selectedLeagueId, supabase]);
+
+  const loadLeagues = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("leagues")
+      .select("id, name, sport")
+      .order("name", { ascending: true });
+
+    if (error) {
+      setMessage(`Could not load leagues: ${error.message}`);
+      return;
+    }
+
+    setLeagues((data ?? []) as LeagueOption[]);
   }, [supabase]);
 
   const loadVenueReferences = useCallback(async () => {
@@ -272,9 +291,9 @@ export function useVenueAvailability() {
 
   useEffect(() => {
     void Promise.resolve().then(() =>
-      Promise.all([loadVenueReferences(), loadAvailabilities()]),
+      Promise.all([loadLeagues(), loadVenueReferences(), loadAvailabilities()]),
     );
-  }, [loadAvailabilities, loadVenueReferences]);
+  }, [loadAvailabilities, loadLeagues, loadVenueReferences]);
 
   function updateField(field: keyof AvailabilityForm, value: string) {
     setMessage("");
@@ -311,7 +330,6 @@ export function useVenueAvailability() {
       name: venue.name,
       address: venue.address,
       groundType: venue.groundType,
-      capacity: String(venue.capacity),
     });
     setIsVenueModalOpen(true);
   }
@@ -335,15 +353,9 @@ export function useVenueAvailability() {
     const name = newVenueForm.name.trim() || form.venueSearch.trim();
     const address = newVenueForm.address.trim();
     const groundType = newVenueForm.groundType.trim();
-    const capacity = parseVenueCapacity(newVenueForm.capacity);
 
     if (!name) {
       setMessage("Venue name is required.");
-      return;
-    }
-
-    if (capacity === null) {
-      setMessage("Venue capacity must be a whole number greater than 0.");
       return;
     }
 
@@ -351,7 +363,7 @@ export function useVenueAvailability() {
 
     const { data: venueData, error: venueError } = await supabase
       .from("venues")
-      .insert({ name, address, ground_type: groundType, capacity })
+      .insert({ name, address, ground_type: groundType })
       .select("id, name, address, ground_type, capacity")
       .single();
 
@@ -409,15 +421,9 @@ export function useVenueAvailability() {
     const name = newVenueForm.name.trim();
     const address = newVenueForm.address.trim();
     const groundType = newVenueForm.groundType.trim();
-    const capacity = parseVenueCapacity(newVenueForm.capacity);
 
     if (!editingVenueId || !name) {
       setMessage("Venue name is required.");
-      return;
-    }
-
-    if (capacity === null) {
-      setMessage("Venue capacity must be a whole number greater than 0.");
       return;
     }
 
@@ -429,7 +435,6 @@ export function useVenueAvailability() {
         name,
         address,
         ground_type: groundType,
-        capacity,
         updated_at: new Date().toISOString(),
       })
       .eq("id", editingVenueId)
@@ -497,6 +502,10 @@ export function useVenueAvailability() {
     const selectedField = fields.find((field) => field.id === selectedFieldId) ?? null;
     const venue = selectedVenue;
     const capacity = parseAvailabilityCapacity(form.capacity);
+
+    if (!selectedLeagueId) {
+      return { error: "Choose a league before adding availability.", occurrences: [] };
+    }
 
     if (!venue || !selectedField) {
       return {
@@ -621,6 +630,7 @@ export function useVenueAvailability() {
       const { error } = await supabase
         .from("venue_availability")
         .update({
+          league_id: selectedLeagueId,
           field_id: occurrence.fieldId,
           venue_name: occurrence.venueName,
           capacity: occurrence.capacity,
@@ -650,6 +660,7 @@ export function useVenueAvailability() {
 
     const recurringSeriesId = form.mode === "recurring" ? crypto.randomUUID() : null;
     const rows = occurrences.map((occurrence) => ({
+      league_id: selectedLeagueId,
       field_id: occurrence.fieldId,
       venue_name: occurrence.venueName,
       capacity: occurrence.capacity,
@@ -697,6 +708,13 @@ export function useVenueAvailability() {
     setMessage("");
   }
 
+  function selectLeague(leagueId: string) {
+    setMessage("");
+    setSelectedLeagueId(leagueId);
+    resetForm();
+    setIsLoading(true);
+  }
+
   async function deleteAvailability(id: string) {
     setMessage("");
 
@@ -733,10 +751,12 @@ export function useVenueAvailability() {
     isVenueModalOpen,
     message,
     matchingVenues,
+    leagues,
     newFieldLabel,
     newVenueForm,
     overlapIds,
     selectedFieldId,
+    selectedLeagueId,
     selectedVenue,
     selectedVenueFields,
     sortedAvailabilities,
@@ -752,6 +772,7 @@ export function useVenueAvailability() {
     recurringSummary,
     resetForm,
     selectVenue,
+    selectLeague,
     setForm,
     setIsFieldModalOpen,
     setNewFieldLabel,

@@ -23,6 +23,8 @@ export default function VenueAvailabilityPage() {
             isSaving={venueAvailability.isSaving}
             message={venueAvailability.message}
             recurringSummary={venueAvailability.recurringSummary}
+            leagues={venueAvailability.leagues}
+            selectedLeagueId={venueAvailability.selectedLeagueId}
             selectedVenue={venueAvailability.selectedVenue}
             selectedVenueFields={venueAvailability.selectedVenueFields}
             selectedFieldId={venueAvailability.selectedFieldId}
@@ -31,6 +33,7 @@ export default function VenueAvailabilityPage() {
             onSubmit={venueAvailability.handleSubmit}
             onReset={venueAvailability.resetForm}
             onUpdateField={venueAvailability.updateField}
+            onSelectLeague={venueAvailability.selectLeague}
             onSetForm={venueAvailability.setForm}
             onSelectVenue={venueAvailability.selectVenue}
             onOpenAddVenue={venueAvailability.openAddVenueModal}

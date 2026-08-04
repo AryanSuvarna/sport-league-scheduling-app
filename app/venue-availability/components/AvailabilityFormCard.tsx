@@ -2,6 +2,8 @@ import type { FormEvent, RefObject } from "react";
 import type { AvailabilityForm, EntryMode, Field, Venue } from "../types";
 import { dayOptions } from "../utils";
 
+type LeagueOption = { id: string; name: string; sport: string };
+
 type AvailabilityFormCardProps = {
   form: AvailabilityForm;
   formRef: RefObject<HTMLFormElement | null>;
@@ -9,6 +11,8 @@ type AvailabilityFormCardProps = {
   isSaving: boolean;
   message: string;
   recurringSummary: string;
+  leagues: LeagueOption[];
+  selectedLeagueId: string;
   selectedVenue: Venue | null;
   selectedVenueFields: Field[];
   selectedFieldId: string;
@@ -17,6 +21,7 @@ type AvailabilityFormCardProps = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onReset: () => void;
   onUpdateField: (field: keyof AvailabilityForm, value: string) => void;
+  onSelectLeague: (leagueId: string) => void;
   onSetForm: (updater: (form: AvailabilityForm) => AvailabilityForm) => void;
   onSelectVenue: (venue: Venue) => void;
   onOpenAddVenue: () => void;
@@ -31,6 +36,8 @@ export function AvailabilityFormCard({
   isSaving,
   message,
   recurringSummary,
+  leagues,
+  selectedLeagueId,
   selectedVenue,
   selectedVenueFields,
   selectedFieldId,
@@ -39,6 +46,7 @@ export function AvailabilityFormCard({
   onSubmit,
   onReset,
   onUpdateField,
+  onSelectLeague,
   onSetForm,
   onSelectVenue,
   onOpenAddVenue,
@@ -72,6 +80,23 @@ export function AvailabilityFormCard({
       </div>
 
       <div className="grid gap-4">
+        <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
+          League
+          <select
+            value={selectedLeagueId}
+            onChange={(event) => onSelectLeague(event.target.value)}
+            required
+            className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
+          >
+            <option value="">Choose a league</option>
+            {leagues.map((league) => (
+              <option key={league.id} value={league.id}>
+                {league.name} · {league.sport}
+              </option>
+            ))}
+          </select>
+        </label>
+
         {!isEditing ? (
           <div className="grid grid-cols-2 gap-2 rounded-md bg-[#eef3ee] p-1">
             {(["single", "recurring"] as EntryMode[]).map((mode) => (
@@ -130,8 +155,7 @@ export function AvailabilityFormCard({
                         </span>
                       ) : null}
                       <span className="mt-1 block text-xs text-[#637066]">
-                        {venue.groundType || "Unspecified surface"} · Capacity{" "}
-                        {venue.capacity}
+                        {venue.groundType || "Unspecified surface"}
                       </span>
                     </button>
                   ))}
@@ -161,8 +185,7 @@ export function AvailabilityFormCard({
                     </p>
                   ) : null}
                   <p className="mt-1 text-xs text-[#637066]">
-                    {selectedVenue.groundType || "Unspecified surface"} · Capacity{" "}
-                    {selectedVenue.capacity}
+                    {selectedVenue.groundType || "Unspecified surface"}
                   </p>
                 </div>
                 <div className="flex shrink-0 gap-3">

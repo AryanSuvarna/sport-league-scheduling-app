@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import {
   CalendarCheck,
   CalendarDays,
@@ -23,9 +23,8 @@ type Weekday =
 type TimeOfDay = "Morning" | "Afternoon" | "Evening";
 
 type TeamCaptainForm = {
-  teamName: string;
-  captainName: string;
-  captainEmail: string;
+  leagueId: string;
+  teamId: string;
   availableStartDate: string;
   availableEndDate: string;
   availableDates: string[];
@@ -37,10 +36,20 @@ type TeamCaptainForm = {
   notes: string;
 };
 
-const leagueSeason = {
-  startDate: "2026-05-01",
-  endDate: "2026-09-30",
-  label: "May 1 - September 30, 2026",
+type LeagueTeam = {
+  id: string;
+  name: string;
+  captain_name: string;
+  captain_email: string | null;
+};
+
+type League = {
+  id: string;
+  name: string;
+  sport: string;
+  season_start_date: string;
+  season_end_date: string;
+  league_teams: LeagueTeam[];
 };
 
 const weekdayOptions: Weekday[] = [
@@ -55,9 +64,8 @@ const weekdayOptions: Weekday[] = [
 const timeOfDayOptions: TimeOfDay[] = ["Morning", "Afternoon", "Evening"];
 
 const initialForm: TeamCaptainForm = {
-  teamName: "",
-  captainName: "",
-  captainEmail: "",
+  leagueId: "",
+  teamId: "",
   availableStartDate: "",
   availableEndDate: "",
   availableDates: [""],
@@ -73,8 +81,10 @@ function compactDates(dates: string[]) {
   return dates.filter(Boolean);
 }
 
-function isInsideSeason(date: string) {
-  return date >= leagueSeason.startDate && date <= leagueSeason.endDate;
+function isInsideSeason(date: string, league: League | null) {
+  return Boolean(
+    league && date >= league.season_start_date && date <= league.season_end_date,
+  );
 }
 
 export default function TeamCaptainPage() {
@@ -83,11 +93,41 @@ export default function TeamCaptainPage() {
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [isSaving, setIsSaving] = useState(false);
+  const [leagues, setLeagues] = useState<League[]>([]);
+  const [isLoadingLeagues, setIsLoadingLeagues] = useState(true);
 
   const availableDates = compactDates(form.availableDates);
   const blackoutDates = compactDates(form.blackoutDates);
   const hasAvailabilityRange = form.availableStartDate && form.availableEndDate;
   const hasAvailableDates = availableDates.length > 0;
+  const selectedLeague = useMemo(
+    () => leagues.find((league) => league.id === form.leagueId) ?? null,
+    [form.leagueId, leagues],
+  );
+  const selectedTeam = useMemo(
+    () => selectedLeague?.league_teams.find((team) => team.id === form.teamId) ?? null,
+    [form.teamId, selectedLeague],
+  );
+
+  useEffect(() => {
+    async function loadLeagues() {
+      const { data, error } = await supabase
+        .from("leagues")
+        .select("id, name, sport, season_start_date, season_end_date, league_teams(id, name, captain_name, captain_email)")
+        .order("name", { ascending: true });
+
+      if (error) {
+        setMessageTone("error");
+        setMessage(`Could not load leagues: ${error.message}`);
+      } else {
+        setLeagues((data ?? []) as League[]);
+      }
+
+      setIsLoadingLeagues(false);
+    }
+
+    void loadLeagues();
+  }, [supabase]);
 
   function updateField(field: keyof TeamCaptainForm, value: string) {
     setMessage("");
@@ -180,27 +220,23 @@ export default function TeamCaptainPage() {
   }
 
   function validateForm() {
-    if (!form.teamName.trim()) {
-      return "Team name is required.";
+    if (!selectedLeague) {
+      return "Choose your league.";
     }
 
-    if (!form.captainName.trim()) {
-      return "Captain name is required.";
-    }
-
-    if (!form.captainEmail.includes("@")) {
-      return "Enter a valid captain email.";
+    if (!selectedTeam) {
+      return "Choose your team.";
     }
 
     if (!hasAvailabilityRange && !hasAvailableDates) {
       return "Add an availability range or at least one available date.";
     }
 
-    if (form.availableStartDate && !isInsideSeason(form.availableStartDate)) {
+    if (form.availableStartDate && !isInsideSeason(form.availableStartDate, selectedLeague)) {
       return "Availability start date must be inside the league season.";
     }
 
-    if (form.availableEndDate && !isInsideSeason(form.availableEndDate)) {
+    if (form.availableEndDate && !isInsideSeason(form.availableEndDate, selectedLeague)) {
       return "Availability end date must be inside the league season.";
     }
 
@@ -212,11 +248,11 @@ export default function TeamCaptainPage() {
       return "Availability end date must be on or after the start date.";
     }
 
-    if (availableDates.some((date) => !isInsideSeason(date))) {
+    if (availableDates.some((date) => !isInsideSeason(date, selectedLeague))) {
       return "Specific available dates must be inside the league season.";
     }
 
-    if (blackoutDates.some((date) => !isInsideSeason(date))) {
+    if (blackoutDates.some((date) => !isInsideSeason(date, selectedLeague))) {
       return "Blackout dates must be inside the league season.";
     }
 
@@ -254,11 +290,7 @@ export default function TeamCaptainPage() {
     setIsSaving(true);
 
     const { error } = await supabase.from("team_availability_submissions").insert({
-      team_name: form.teamName.trim(),
-      captain_name: form.captainName.trim(),
-      captain_email: form.captainEmail.trim(),
-      season_start_date: leagueSeason.startDate,
-      season_end_date: leagueSeason.endDate,
+      team_id: selectedTeam!.id,
       available_start_date: form.availableStartDate || null,
       available_end_date: form.availableEndDate || null,
       available_dates: availableDates,
@@ -314,45 +346,53 @@ export default function TeamCaptainPage() {
               <h2 className="text-lg font-semibold text-[#16211b]">Team details</h2>
             </div>
 
-            <div className="rounded-md border border-[#d6ded5] bg-[#f7faf5] px-3 py-2 text-sm font-medium text-[#405047]">
-              League season: <span className="text-[#16211b]">{leagueSeason.label}</span>
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
+                League
+                <select
+                  value={form.leagueId}
+                  onChange={(event) =>
+                    setForm((currentForm) => ({
+                      ...currentForm,
+                      leagueId: event.target.value,
+                      teamId: "",
+                    }))
+                  }
+                  required
+                  className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
+                >
+                  <option value="">{isLoadingLeagues ? "Loading leagues..." : "Choose a league"}</option>
+                  {leagues.map((league) => (
+                    <option key={league.id} value={league.id}>
+                      {league.name} · {league.sport}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
+                Team
+                <select
+                  value={form.teamId}
+                  onChange={(event) => updateField("teamId", event.target.value)}
+                  required
+                  disabled={!selectedLeague}
+                  className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
+                >
+                  <option value="">{selectedLeague ? "Choose your team" : "Choose a league first"}</option>
+                  {selectedLeague?.league_teams.map((team) => (
+                    <option key={team.id} value={team.id}>{team.name}</option>
+                  ))}
+                </select>
+              </label>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
-              <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
-                Team name
-                <input
-                  value={form.teamName}
-                  onChange={(event) => updateField("teamName", event.target.value)}
-                  required
-                  className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
-                  placeholder="Mississauga Strikers"
-                />
-              </label>
-
-              <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
-                Captain name
-                <input
-                  value={form.captainName}
-                  onChange={(event) => updateField("captainName", event.target.value)}
-                  required
-                  className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
-                  placeholder="Captain full name"
-                />
-              </label>
-
-              <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
-                Captain email
-                <input
-                  type="email"
-                  value={form.captainEmail}
-                  onChange={(event) => updateField("captainEmail", event.target.value)}
-                  required
-                  className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
-                  placeholder="captain@example.com"
-                />
-              </label>
-            </div>
+            {selectedLeague ? (
+              <div className="rounded-md border border-[#d6ded5] bg-[#f7faf5] px-3 py-2 text-sm font-medium text-[#405047]">
+                League season: <span className="text-[#16211b]">{selectedLeague.season_start_date} to {selectedLeague.season_end_date}</span>
+                {selectedTeam ? <span className="block mt-1 text-xs">Captain: {selectedTeam.captain_name}{selectedTeam.captain_email ? ` · ${selectedTeam.captain_email}` : ""}</span> : null}
+              </div>
+            ) : null}
           </section>
 
           <section className="grid gap-4 border-t border-[#e1e7e2] pt-5">
@@ -366,8 +406,8 @@ export default function TeamCaptainPage() {
                 Range start
                 <input
                   type="date"
-                  min={leagueSeason.startDate}
-                  max={leagueSeason.endDate}
+                  min={selectedLeague?.season_start_date ?? ""}
+                  max={selectedLeague?.season_end_date ?? ""}
                   value={form.availableStartDate}
                   onChange={(event) =>
                     updateField("availableStartDate", event.target.value)
@@ -380,8 +420,8 @@ export default function TeamCaptainPage() {
                 Range end
                 <input
                   type="date"
-                  min={leagueSeason.startDate}
-                  max={leagueSeason.endDate}
+                  min={selectedLeague?.season_start_date ?? ""}
+                  max={selectedLeague?.season_end_date ?? ""}
                   value={form.availableEndDate}
                   onChange={(event) => updateField("availableEndDate", event.target.value)}
                   className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20"
@@ -396,8 +436,8 @@ export default function TeamCaptainPage() {
                     Specific available date {index + 1}
                     <input
                       type="date"
-                      min={leagueSeason.startDate}
-                      max={leagueSeason.endDate}
+                      min={selectedLeague?.season_start_date ?? ""}
+                      max={selectedLeague?.season_end_date ?? ""}
                       value={date}
                       onChange={(event) =>
                         updateDateList("availableDates", index, event.target.value)
@@ -530,8 +570,8 @@ export default function TeamCaptainPage() {
                     Unavailable date {index + 1}
                     <input
                       type="date"
-                      min={leagueSeason.startDate}
-                      max={leagueSeason.endDate}
+                      min={selectedLeague?.season_start_date ?? ""}
+                      max={selectedLeague?.season_end_date ?? ""}
                       value={date}
                       onChange={(event) =>
                         updateDateList("blackoutDates", index, event.target.value)

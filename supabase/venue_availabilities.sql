@@ -50,6 +50,7 @@ execute function public.create_default_field_for_venue();
 
 create table if not exists public.venue_availability (
   id uuid primary key default gen_random_uuid(),
+  league_id uuid not null references public.leagues (id) on delete cascade,
   venue_name text check (venue_name is null or char_length(trim(venue_name)) > 0),
   field_id uuid references public.fields (id),
   permit_date date not null,
@@ -75,6 +76,28 @@ create table if not exists public.venue_availability (
     )
   )
 );
+
+-- Existing permits are intentionally discarded because they have no reliable
+-- league association. New linked rows are preserved on subsequent executions.
+do $$
+begin
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'venue_availability'
+      and column_name = 'league_id'
+  ) then
+    delete from public.venue_availability;
+  end if;
+end;
+$$;
+
+alter table public.venue_availability
+add column if not exists league_id uuid references public.leagues (id) on delete cascade;
+
+alter table public.venue_availability
+alter column league_id set not null;
 
 alter table public.venue_availability
 alter column venue_name drop not null;
@@ -243,6 +266,9 @@ on public.venue_availability (permit_date, permit_start_time);
 
 create index if not exists venue_availability_field_date_start_idx
 on public.venue_availability (field_id, permit_date, permit_start_time);
+
+create index if not exists venue_availability_league_date_start_idx
+on public.venue_availability (league_id, permit_date, permit_start_time);
 
 create index if not exists venue_availability_series_idx
 on public.venue_availability (recurring_series_id);

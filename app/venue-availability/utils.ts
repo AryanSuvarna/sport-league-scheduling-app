@@ -50,6 +50,7 @@ export function mapRowToAvailability(row: VenueAvailabilityRow): Availability {
 
   return {
     id: row.id,
+    leagueId: row.league_id,
     fieldId: row.field_id,
     venueId: venue?.id ?? field?.venue_id ?? "",
     venueName: venue?.name ?? "Unknown venue",
