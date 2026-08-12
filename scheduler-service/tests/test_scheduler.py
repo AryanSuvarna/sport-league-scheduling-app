@@ -4,6 +4,65 @@ from app.main import ScheduleRequest, build_schedule
 
 
 class SchedulerTests(TestCase):
+    def test_penalizes_each_teams_unsatisfied_preference(self):
+        request = ScheduleRequest.model_validate(
+            {
+                "teams": [
+                    {"id": "a", "name": "A", "preferred_slot_ids": ["s2"]},
+                    {"id": "b", "name": "B", "preferred_slot_ids": ["s3"]},
+                ],
+                "slots": [
+                    {
+                        "id": "s1",
+                        "field_id": "f1",
+                        "starts_at": "2026-05-01T18:00:00Z",
+                        "ends_at": "2026-05-01T20:00:00Z",
+                    },
+                    {
+                        "id": "s2",
+                        "field_id": "f1",
+                        "starts_at": "2026-05-08T18:00:00Z",
+                        "ends_at": "2026-05-08T20:00:00Z",
+                    },
+                    {
+                        "id": "s3",
+                        "field_id": "f1",
+                        "starts_at": "2026-05-15T18:00:00Z",
+                        "ends_at": "2026-05-15T20:00:00Z",
+                    },
+                ],
+            }
+        )
+
+        response = build_schedule(request)
+
+        self.assertEqual(response.status, "optimal")
+        self.assertEqual(response.matches[0].slot_id, "s2")
+        self.assertEqual(response.objective_value, 1011)
+
+    def test_explicit_empty_allowed_slots_means_team_is_unavailable(self):
+        request = ScheduleRequest.model_validate(
+            {
+                "teams": [
+                    {"id": "a", "name": "A", "allowed_slot_ids": []},
+                    {"id": "b", "name": "B", "allowed_slot_ids": ["s1"]},
+                ],
+                "slots": [
+                    {
+                        "id": "s1",
+                        "field_id": "f1",
+                        "starts_at": "2026-05-01T18:00:00Z",
+                        "ends_at": "2026-05-01T20:00:00Z",
+                    }
+                ],
+            }
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "A and B have no mutually available slot"
+        ):
+            build_schedule(request)
+
     def test_generates_a_deterministic_round_robin_without_team_conflicts(self):
         request = ScheduleRequest.model_validate(
             {
@@ -56,6 +115,34 @@ class SchedulerTests(TestCase):
                     }
                 ],
                 "settings": {"games_per_pair": 2, "max_matches_per_team_per_week": 1},
+            }
+        )
+
+        self.assertEqual(build_schedule(request).status, "infeasible")
+
+    def test_enforces_daily_match_limit(self):
+        request = ScheduleRequest.model_validate(
+            {
+                "teams": [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}],
+                "slots": [
+                    {
+                        "id": "s1",
+                        "field_id": "f1",
+                        "starts_at": "2026-05-01T10:00:00Z",
+                        "ends_at": "2026-05-01T12:00:00Z",
+                    },
+                    {
+                        "id": "s2",
+                        "field_id": "f1",
+                        "starts_at": "2026-05-01T14:00:00Z",
+                        "ends_at": "2026-05-01T16:00:00Z",
+                    },
+                ],
+                "settings": {
+                    "games_per_pair": 2,
+                    "max_matches_per_team_per_week": 2,
+                    "max_matches_per_team_per_day": 1,
+                },
             }
         )
 

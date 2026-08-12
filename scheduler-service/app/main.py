@@ -1,7 +1,7 @@
 """Deterministic CP-SAT service for league fixture generation."""
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime
 from itertools import combinations
 from fastapi import FastAPI, HTTPException
 from ortools.sat.python import cp_model
@@ -11,8 +11,9 @@ from pydantic import BaseModel, Field, model_validator
 class Team(BaseModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
-    # Empty means the team is available in every supplied slot.
-    allowed_slot_ids: list[str] = Field(default_factory=list)
+    # None means availability is unrestricted; an explicit empty list means the
+    # team cannot play in any supplied slot.
+    allowed_slot_ids: list[str] | None = None
     # A preference, never a reason to make an otherwise valid schedule infeasible.
     preferred_slot_ids: list[str] = Field(default_factory=list)
 
@@ -34,6 +35,7 @@ class Slot(BaseModel):
 class ScheduleSettings(BaseModel):
     games_per_pair: int = Field(default=1, ge=1, le=10)
     max_matches_per_team_per_week: int = Field(default=1, ge=1, le=7)
+    max_matches_per_team_per_day: int = Field(default=1, ge=1, le=4)
     min_rest_hours: int = Field(default=0, ge=0, le=168)
     max_solve_seconds: int = Field(default=10, ge=1, le=60)
 
@@ -84,7 +86,7 @@ def build_schedule(request: ScheduleRequest) -> ScheduleResponse:
     unknown_slots = {
         slot_id
         for team in request.teams
-        for slot_id in [*team.allowed_slot_ids, *team.preferred_slot_ids]
+        for slot_id in [*(team.allowed_slot_ids or []), *team.preferred_slot_ids]
         if slot_id not in slot_by_id
     }
     if unknown_slots:
@@ -105,11 +107,15 @@ def build_schedule(request: ScheduleRequest) -> ScheduleResponse:
 
     for fixture_index, (first, second, _) in enumerate(fixtures):
         fixture_variables: list[cp_model.IntVar] = []
-        first_allowed = set(first.allowed_slot_ids)
-        second_allowed = set(second.allowed_slot_ids)
+        first_allowed = (
+            None if first.allowed_slot_ids is None else set(first.allowed_slot_ids)
+        )
+        second_allowed = (
+            None if second.allowed_slot_ids is None else set(second.allowed_slot_ids)
+        )
         for slot_index, slot in enumerate(request.slots):
-            if (first_allowed and slot.id not in first_allowed) or (
-                second_allowed and slot.id not in second_allowed
+            if (first_allowed is not None and slot.id not in first_allowed) or (
+                second_allowed is not None and slot.id not in second_allowed
             ):
                 continue
             for first_is_home in (True, False):
@@ -123,9 +129,9 @@ def build_schedule(request: ScheduleRequest) -> ScheduleResponse:
                 variables_by_team_slot[second.id, slot.id].append(variable)
                 # A preferred slot is weighted strongly, then the earlier supplied
                 # slots provide a stable deterministic tie-breaker.
-                if (first.preferred_slot_ids and slot.id not in first.preferred_slot_ids) or (
-                    second.preferred_slot_ids and slot.id not in second.preferred_slot_ids
-                ):
+                if first.preferred_slot_ids and slot.id not in first.preferred_slot_ids:
+                    preference_penalties.append(variable * 1_000)
+                if second.preferred_slot_ids and slot.id not in second.preferred_slot_ids:
                     preference_penalties.append(variable * 1_000)
                 preference_penalties.append(variable * slot_index)
         if not fixture_variables:
@@ -161,6 +167,12 @@ def build_schedule(request: ScheduleRequest) -> ScheduleResponse:
         weekly_variables[team_id, iso_year, iso_week].extend(variables)
     for variables in weekly_variables.values():
         model.add(sum(variables) <= request.settings.max_matches_per_team_per_week)
+
+    daily_variables: dict[tuple[str, date], list[cp_model.IntVar]] = defaultdict(list)
+    for (team_id, slot_id), variables in variables_by_team_slot.items():
+        daily_variables[team_id, slot_by_id[slot_id].starts_at.date()].extend(variables)
+    for variables in daily_variables.values():
+        model.add(sum(variables) <= request.settings.max_matches_per_team_per_day)
 
     # Give home/away balance a lower priority than team preferences.
     home_counts: list[cp_model.IntVar] = []

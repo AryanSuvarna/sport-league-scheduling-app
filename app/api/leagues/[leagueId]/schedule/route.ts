@@ -51,6 +51,7 @@ type SolverResponse = {
 
 type GenerateOptions = {
   gamesPerPair?: number;
+  maxMatchesPerTeamPerDay?: number;
   minRestHours?: number;
 };
 
@@ -166,6 +167,10 @@ export async function POST(
 
   if (
     (options.gamesPerPair !== undefined && (!Number.isInteger(options.gamesPerPair) || options.gamesPerPair < 1)) ||
+    (options.maxMatchesPerTeamPerDay !== undefined &&
+      (!Number.isInteger(options.maxMatchesPerTeamPerDay) ||
+        options.maxMatchesPerTeamPerDay < 1 ||
+        options.maxMatchesPerTeamPerDay > 4)) ||
     (options.minRestHours !== undefined && (!Number.isInteger(options.minRestHours) || options.minRestHours < 0))
   ) {
     return NextResponse.json({ error: "Invalid scheduling options." }, { status: 400 });
@@ -274,6 +279,7 @@ export async function POST(
     settings: {
       games_per_pair: options.gamesPerPair ?? 1,
       max_matches_per_team_per_week: league.max_matches_per_team_per_week,
+      max_matches_per_team_per_day: options.maxMatchesPerTeamPerDay ?? 1,
       min_rest_hours: options.minRestHours ?? 0,
     },
   };

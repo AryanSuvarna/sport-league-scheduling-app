@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ChangeEvent, useMemo, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
   CalendarRange,
   Clock3,
   ListChecks,
+  LoaderCircle,
   MessageCircle,
   Pencil,
   Plus,
@@ -31,13 +32,42 @@ type EditableTeam = {
   isNew: boolean;
 };
 
+type ScheduleMatch = {
+  id: string;
+  home_team_id: string;
+  away_team_id: string;
+  field_id: string;
+  starts_at: string;
+  ends_at: string;
+  home_team_name: string;
+  away_team_name: string;
+  field_label: string;
+  venue_name: string;
+};
+
+type ScheduleRun = {
+  id: string;
+  solver_status: string;
+  objective_value: number | null;
+  created_at: string;
+};
+
 export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
   const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
   const [isEditing, setIsEditing] = useState(false);
   const [message, setMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [sendingInviteTeamId, setSendingInviteTeamId] = useState<string | null>(null);
   const [removedTeamIds, setRemovedTeamIds] = useState<string[]>([]);
+  const [isGeneratingSchedule, setIsGeneratingSchedule] = useState(false);
+  const [isLoadingSchedule, setIsLoadingSchedule] = useState(true);
+  const [scheduleRun, setScheduleRun] = useState<ScheduleRun | null>(null);
+  const [scheduleMatches, setScheduleMatches] = useState<ScheduleMatch[]>([]);
+  const [scheduleOptions, setScheduleOptions] = useState({
+    gamesPerPair: "1",
+    maxMatchesPerTeamPerDay: "1",
+  });
   const [editableLeague, setEditableLeague] = useState({
     name: league.name,
     sport: league.sport,
@@ -63,6 +93,88 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
     editableLeague.seasonStartDate,
     editableLeague.seasonEndDate,
   );
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadLatestSchedule() {
+      setIsLoadingSchedule(true);
+
+      const { data: run, error: runError } = await supabase
+        .from("league_schedule_runs")
+        .select("id, solver_status, objective_value, created_at")
+        .eq("league_id", league.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (isCancelled) return;
+
+      if (runError) {
+        setMessage(`Could not load the latest schedule: ${runError.message}`);
+        setIsLoadingSchedule(false);
+        return;
+      }
+
+      if (!run) {
+        setScheduleRun(null);
+        setScheduleMatches([]);
+        setIsLoadingSchedule(false);
+        return;
+      }
+
+      const { data: rawMatches, error: matchesError } = await supabase
+        .from("league_matches")
+        .select("id, home_team_id, away_team_id, field_id, starts_at, ends_at")
+        .eq("schedule_run_id", run.id)
+        .order("starts_at", { ascending: true });
+
+      if (isCancelled) return;
+
+      if (matchesError) {
+        setMessage(`Could not load schedule matches: ${matchesError.message}`);
+        setIsLoadingSchedule(false);
+        return;
+      }
+
+      const fieldIds = [...new Set((rawMatches ?? []).map((match) => match.field_id))];
+      const { data: fields } = fieldIds.length
+        ? await supabase.from("fields").select("id, label, venues(name)").in("id", fieldIds)
+        : { data: [] };
+      const teamNames = new Map(league.league_teams.map((team) => [team.id, team.name]));
+      const fieldRows = (fields ?? []) as unknown as Array<{
+        id: string;
+        label: string;
+        venues: { name: string } | null;
+      }>;
+      const fieldById = new Map(
+        fieldRows.map((field) => [field.id, { label: field.label, venue: field.venues?.name ?? "Venue" }]),
+      );
+
+      if (isCancelled) return;
+
+      setScheduleRun(run as ScheduleRun);
+      setScheduleMatches(
+        (rawMatches ?? []).map((match) => {
+          const field = fieldById.get(match.field_id);
+          return {
+            ...match,
+            home_team_name: teamNames.get(match.home_team_id) ?? "Unknown team",
+            away_team_name: teamNames.get(match.away_team_id) ?? "Unknown team",
+            field_label: field?.label ?? "Field",
+            venue_name: field?.venue ?? "Venue",
+          };
+        }),
+      );
+      setIsLoadingSchedule(false);
+    }
+
+    void loadLatestSchedule();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [league.id, league.league_teams, supabase]);
 
   function updateField(event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) {
     const { name, value } = event.target;
@@ -323,6 +435,97 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
     }
   }
 
+  async function generateSchedule() {
+    const gamesPerPair = Number(scheduleOptions.gamesPerPair);
+    const maxMatchesPerTeamPerDay = Number(scheduleOptions.maxMatchesPerTeamPerDay);
+
+    if (!Number.isInteger(gamesPerPair) || gamesPerPair < 1 || gamesPerPair > 10) {
+      setMessage("Games per pair must be a whole number from 1 to 10.");
+      return;
+    }
+
+    if (
+      !Number.isInteger(maxMatchesPerTeamPerDay) ||
+      maxMatchesPerTeamPerDay < 1 ||
+      maxMatchesPerTeamPerDay > 4
+    ) {
+      setMessage("Max matches per team per day must be a whole number from 1 to 4.");
+      return;
+    }
+
+    setIsGeneratingSchedule(true);
+    setMessage("");
+
+    try {
+      const response = await fetch(`/api/leagues/${league.id}/schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gamesPerPair, maxMatchesPerTeamPerDay }),
+      });
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        const missingTeams = result?.missing_teams?.join(", ");
+        setMessage(
+          missingTeams
+            ? `${result?.error ?? "Could not generate schedule."} Missing: ${missingTeams}`
+            : result?.error ?? "Could not generate schedule.",
+        );
+        return;
+      }
+
+      setMessage(`Schedule generated with ${result.matches?.length ?? 0} matches.`);
+      router.refresh();
+      // Reloading the page data is unnecessary; the schedule effect below reads
+      // the newest persisted run after this request completes.
+      const { data: latestRun } = await supabase
+        .from("league_schedule_runs")
+        .select("id, solver_status, objective_value, created_at")
+        .eq("league_id", league.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (latestRun) {
+        const { data: latestMatches } = await supabase
+          .from("league_matches")
+          .select("id, home_team_id, away_team_id, field_id, starts_at, ends_at")
+          .eq("schedule_run_id", latestRun.id)
+          .order("starts_at", { ascending: true });
+        const teamNames = new Map(league.league_teams.map((team) => [team.id, team.name]));
+        const fieldIds = [...new Set((latestMatches ?? []).map((match) => match.field_id))];
+        const { data: fields } = fieldIds.length
+          ? await supabase.from("fields").select("id, label, venues(name)").in("id", fieldIds)
+          : { data: [] };
+        const fieldRows = (fields ?? []) as unknown as Array<{
+          id: string;
+          label: string;
+          venues: { name: string } | null;
+        }>;
+        const fieldById = new Map(
+          fieldRows.map((field) => [field.id, { label: field.label, venue: field.venues?.name ?? "Venue" }]),
+        );
+        setScheduleRun(latestRun as ScheduleRun);
+        setScheduleMatches(
+          (latestMatches ?? []).map((match) => {
+            const field = fieldById.get(match.field_id);
+            return {
+              ...match,
+              home_team_name: teamNames.get(match.home_team_id) ?? "Unknown team",
+              away_team_name: teamNames.get(match.away_team_id) ?? "Unknown team",
+              field_label: field?.label ?? "Field",
+              venue_name: field?.venue ?? "Venue",
+            };
+          }),
+        );
+      }
+    } catch {
+      setMessage("Could not reach the scheduling service.");
+    } finally {
+      setIsGeneratingSchedule(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[#f6f7f4] text-[#18211c]">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 px-4 py-6 sm:px-6 lg:px-8">
@@ -378,6 +581,124 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
 
         <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="space-y-5">
+            <section className="rounded-md border border-[#d6ded5] bg-white p-5 shadow-sm">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium text-[#637066]">Scheduling</p>
+                  <h2 className="mt-1 text-xl font-semibold text-[#18211c]">Generate schedule</h2>
+                  <p className="mt-1 max-w-2xl text-sm leading-6 text-[#637066]">
+                    Create a deterministic fixture list from team availability and venue permits.
+                    Existing generated runs remain saved in Supabase.
+                  </p>
+                </div>
+                {scheduleRun ? (
+                  <span className="inline-flex w-fit rounded-full bg-[#e9f1eb] px-3 py-1 text-xs font-semibold text-[#1f5b47]">
+                    {scheduleRun.solver_status}
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="mt-5 grid gap-4 sm:grid-cols-3 sm:items-end">
+                <label className="block text-sm font-medium text-[#39433d]">
+                  Games per pair
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={scheduleOptions.gamesPerPair}
+                    onChange={(event) =>
+                      setScheduleOptions((current) => ({
+                        ...current,
+                        gamesPerPair: event.target.value,
+                      }))
+                    }
+                    className="mt-2 h-11 w-full rounded-md border border-[#cfd8d0] bg-white px-3 text-sm text-[#18211c] outline-none transition focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/15"
+                  />
+                  <span className="mt-1 block text-xs font-normal text-[#637066]">
+                    1 = single round robin; 2 = home and away.
+                  </span>
+                </label>
+                <label className="block text-sm font-medium text-[#39433d]">
+                  Max matches per team per day
+                  <input
+                    type="number"
+                    min="1"
+                    max="4"
+                    value={scheduleOptions.maxMatchesPerTeamPerDay}
+                    onChange={(event) =>
+                      setScheduleOptions((current) => ({
+                        ...current,
+                        maxMatchesPerTeamPerDay: event.target.value,
+                      }))
+                    }
+                    className="mt-2 h-11 w-full rounded-md border border-[#cfd8d0] bg-white px-3 text-sm text-[#18211c] outline-none transition focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/15"
+                  />
+                  <span className="mt-1 block text-xs font-normal text-[#637066]">
+                    Default is 1 to avoid same-day doubleheaders.
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  onClick={generateSchedule}
+                  disabled={isGeneratingSchedule}
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#1f5b47] px-5 text-sm font-semibold text-white transition hover:bg-[#164333] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isGeneratingSchedule ? (
+                    <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  ) : null}
+                  {isGeneratingSchedule ? "Generating..." : "Generate schedule"}
+                </button>
+              </div>
+
+              {isLoadingSchedule ? (
+                <p className="mt-6 text-sm text-[#637066]">Loading saved schedule...</p>
+              ) : scheduleMatches.length > 0 ? (
+                <div className="mt-6 overflow-hidden rounded-md border border-[#e1e7e0]">
+                  <div className="border-b border-[#e1e7e0] bg-[#fbfcfa] px-4 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-sm font-semibold text-[#18211c]">
+                        {scheduleMatches.length} scheduled matches
+                      </h3>
+                      <span className="text-xs text-[#637066]">
+                        Generated {formatScheduleDate(scheduleRun?.created_at ?? "")}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="divide-y divide-[#e1e7e0]">
+                    {scheduleMatches.map((match) => (
+                      <div
+                        key={match.id}
+                        className="grid gap-2 px-4 py-4 sm:grid-cols-[150px_minmax(0,1fr)_minmax(0,1fr)_170px] sm:items-center"
+                      >
+                        <div>
+                          <p className="text-sm font-semibold text-[#18211c]">
+                            {formatScheduleDate(match.starts_at)}
+                          </p>
+                          <p className="mt-1 text-sm text-[#637066]">
+                            {formatScheduleTime(match.starts_at)} – {formatScheduleTime(match.ends_at)}
+                          </p>
+                        </div>
+                        <TeamCell label="Home" value={match.home_team_name} />
+                        <TeamCell label="Away" value={match.away_team_name} />
+                        <div className="text-sm text-[#637066]">
+                          <span className="mb-1 block text-xs font-semibold uppercase text-[#637066]">
+                            Venue
+                          </span>
+                          <p className="font-medium text-[#39433d]">
+                            {match.venue_name} / {match.field_label}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-6 rounded-md border border-dashed border-[#cfd8d0] bg-[#fbfcfa] px-4 py-5 text-sm text-[#637066]">
+                  No schedule has been generated yet. Confirm that every team has submitted availability and that venue permits cover the season.
+                </div>
+              )}
+            </section>
+
             {isEditing ? (
               <section className="rounded-md border border-[#d6ded5] bg-white p-5 shadow-sm">
                 <h2 className="text-lg font-semibold text-[#18211c]">Edit league</h2>
@@ -612,6 +933,29 @@ function formatEditableTeam(team: LeagueTeam): EditableTeam {
     captainEmail: team.captain_email || "",
     isNew: false,
   };
+}
+
+function formatScheduleDate(value: string) {
+  if (!value) return "";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatScheduleTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function TeamCell({
