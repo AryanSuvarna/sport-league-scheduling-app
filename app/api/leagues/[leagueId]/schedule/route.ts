@@ -308,6 +308,7 @@ export async function POST(
     .insert({
       league_id: league.id,
       solver_status: solverResponse.status,
+      schedule_status: "draft",
       input_snapshot: solverPayload,
       objective_value: solverResponse.objective_value,
     })
@@ -330,6 +331,7 @@ export async function POST(
         venue_availability_id: slot.source_permit_id,
         starts_at: match.starts_at,
         ends_at: match.ends_at,
+        match_status: "scheduled",
       };
     }),
   );

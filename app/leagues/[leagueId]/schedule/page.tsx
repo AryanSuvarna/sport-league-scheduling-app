@@ -25,7 +25,7 @@ export default async function SchedulePage({ params }: SchedulePageProps) {
       .returns<ScheduleLeague>(),
     supabase
       .from("league_schedule_runs")
-      .select("id, solver_status, objective_value, created_at")
+        .select("id, solver_status, schedule_status, objective_value, created_at")
       .eq("league_id", leagueId)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -62,7 +62,7 @@ export default async function SchedulePage({ params }: SchedulePageProps) {
 
   const { data: rawMatches, error: matchesError } = await supabase
     .from("league_matches")
-    .select("id, home_team_id, away_team_id, field_id, starts_at, ends_at")
+    .select("id, home_team_id, away_team_id, field_id, starts_at, ends_at, match_status")
     .eq("schedule_run_id", run.id)
     .order("starts_at", { ascending: true });
 

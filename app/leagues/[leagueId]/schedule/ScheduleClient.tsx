@@ -28,6 +28,7 @@ export type ScheduleMatch = {
   field_id: string;
   starts_at: string;
   ends_at: string;
+  match_status: "scheduled" | "confirmed" | "played" | "cancelled";
   home_team_name: string;
   away_team_name: string;
   field_label: string;
@@ -37,6 +38,7 @@ export type ScheduleMatch = {
 export type ScheduleRun = {
   id: string;
   solver_status: string;
+  schedule_status: "draft" | "published" | "archived";
   objective_value: number | null;
   created_at: string;
 };
@@ -45,6 +47,11 @@ type GenerateScheduleResult = {
   error?: string;
   missing_teams?: string[];
   matches?: unknown[];
+};
+
+type LifecycleResult = {
+  error?: string;
+  schedule_status?: ScheduleRun["schedule_status"];
 };
 
 type ScheduleClientProps = {
@@ -76,7 +83,7 @@ export function ScheduleClient({
 
     const { data: run, error: runError } = await supabase
       .from("league_schedule_runs")
-      .select("id, solver_status, objective_value, created_at")
+      .select("id, solver_status, schedule_status, objective_value, created_at")
       .eq("league_id", league.id)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -97,7 +104,7 @@ export function ScheduleClient({
 
     const { data: rawMatches, error: matchesError } = await supabase
       .from("league_matches")
-      .select("id, home_team_id, away_team_id, field_id, starts_at, ends_at")
+      .select("id, home_team_id, away_team_id, field_id, starts_at, ends_at, match_status")
       .eq("schedule_run_id", run.id)
       .order("starts_at", { ascending: true });
 
@@ -198,6 +205,59 @@ export function ScheduleClient({
     }
   }
 
+  async function updateScheduleLifecycle(action: "publish" | "archive") {
+    if (!scheduleRun) return;
+
+    setIsLoading(true);
+    setMessage("");
+    try {
+      const response = await fetch(
+        `/api/leagues/${league.id}/schedule/${scheduleRun.id}/${action}`,
+        { method: "POST" },
+      );
+      const result = (await response.json().catch(() => null)) as LifecycleResult | null;
+
+      if (!response.ok) {
+        setMessage(result?.error ?? `Could not ${action} schedule.`);
+        return;
+      }
+
+      setMessage(action === "publish" ? "Schedule published." : "Schedule archived.");
+      await loadLatestSchedule();
+    } catch {
+      setMessage(`Could not ${action} schedule.`);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function updateMatchStatus(
+    matchId: string,
+    matchStatus: ScheduleMatch["match_status"],
+  ) {
+    try {
+      const response = await fetch(`/api/leagues/${league.id}/schedule/matches/${matchId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matchStatus }),
+      });
+      const result = (await response.json().catch(() => null)) as { error?: string } | null;
+
+      if (!response.ok) {
+        setMessage(result?.error ?? "Could not update match status.");
+        return;
+      }
+
+      setMatches((currentMatches) =>
+        currentMatches.map((match) =>
+          match.id === matchId ? { ...match, match_status: matchStatus } : match,
+        ),
+      );
+    } catch {
+      setMessage("Could not update match status.");
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[#f6f7f4] text-[#18211c]">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 px-4 py-6 sm:px-6 lg:px-8">
@@ -239,13 +299,16 @@ export function ScheduleClient({
               </p>
             </div>
             {scheduleRun ? (
-              <span className="inline-flex w-fit rounded-full bg-[#e9f1eb] px-3 py-1 text-xs font-semibold text-[#1f5b47]">
-                {scheduleRun.solver_status}
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex w-fit rounded-full bg-[#e9f1eb] px-3 py-1 text-xs font-semibold uppercase text-[#1f5b47]">
+                  {scheduleRun.schedule_status}
+                </span>
+                <span className="text-xs text-[#637066]">Solver: {scheduleRun.solver_status}</span>
+              </div>
             ) : null}
           </div>
 
-          <div className="mt-5 grid gap-4 sm:grid-cols-3 sm:items-end">
+          <div className="mt-5 grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(220px,0.9fr)] sm:items-end">
             <label className="block text-sm font-medium text-[#39433d]">
               Games per pair
               <input
@@ -281,15 +344,37 @@ export function ScheduleClient({
                 Default is 1 to avoid same-day doubleheaders.
               </span>
             </label>
-            <button
-              type="button"
-              onClick={generateSchedule}
-              disabled={isGenerating}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#1f5b47] px-5 text-sm font-semibold text-white transition hover:bg-[#164333] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isGenerating ? <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-              {isGenerating ? "Generating..." : scheduleRun ? "Regenerate schedule" : "Generate schedule"}
-            </button>
+            <div className="flex flex-col gap-3 sm:self-end">
+              {scheduleRun?.schedule_status === "draft" ? (
+                <button
+                  type="button"
+                  onClick={() => void updateScheduleLifecycle("publish")}
+                  disabled={isGenerating || isLoading}
+                  className="inline-flex h-11 w-full items-center justify-center rounded-md border border-[#c7d3ca] bg-white px-5 text-sm font-semibold text-[#1f5b47] transition hover:border-[#9fb5a8] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Publish draft
+                </button>
+              ) : null}
+              {scheduleRun?.schedule_status === "published" ? (
+                <button
+                  type="button"
+                  onClick={() => void updateScheduleLifecycle("archive")}
+                  disabled={isGenerating || isLoading}
+                  className="inline-flex h-11 w-full items-center justify-center rounded-md border border-[#e1c3bd] bg-white px-5 text-sm font-semibold text-[#9a3d31] transition hover:border-[#c99388] focus:outline-none focus:ring-2 focus:ring-[#9a3d31] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Archive published
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={generateSchedule}
+                disabled={isGenerating}
+                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[#1f5b47] px-5 text-sm font-semibold text-white transition hover:bg-[#164333] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isGenerating ? <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+                {isGenerating ? "Generating..." : scheduleRun ? "Regenerate schedule" : "Generate schedule"}
+              </button>
+            </div>
           </div>
         </section>
 
@@ -313,7 +398,7 @@ export function ScheduleClient({
                 {matches.map((match) => (
                   <div
                     key={match.id}
-                    className="grid gap-3 py-4 sm:grid-cols-[150px_minmax(0,1fr)_minmax(0,1fr)_200px] sm:items-center"
+                    className="grid gap-3 py-4 sm:grid-cols-[150px_minmax(0,1fr)_minmax(0,1fr)_200px_150px] sm:items-center"
                   >
                     <div>
                       <p className="text-sm font-semibold text-[#18211c]">
@@ -334,6 +419,24 @@ export function ScheduleClient({
                         {match.venue_name} / {match.field_label}
                       </p>
                     </div>
+                    <label className="text-sm text-[#637066]">
+                      <span className="mb-1 block text-xs font-semibold uppercase">Status</span>
+                      <select
+                        value={match.match_status}
+                        onChange={(event) =>
+                          void updateMatchStatus(
+                            match.id,
+                            event.target.value as ScheduleMatch["match_status"],
+                          )
+                        }
+                        className="h-9 w-full rounded-md border border-[#cfd8d0] bg-white px-2 text-sm font-medium text-[#39433d] outline-none focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/15"
+                      >
+                        <option value="scheduled">Scheduled</option>
+                        <option value="confirmed">Confirmed</option>
+                        <option value="played">Played</option>
+                        <option value="cancelled">Cancelled</option>
+                      </select>
+                    </label>
                   </div>
                 ))}
               </div>
