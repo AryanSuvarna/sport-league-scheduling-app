@@ -38,4 +38,4 @@ The solver always uses one worker and a fixed random seed, so equal inputs produ
 2. Deploy this service and set `SCHEDULER_SERVICE_URL` in the Next.js environment, for example `http://127.0.0.1:8001` locally.
 3. Request `POST /api/leagues/:leagueId/schedule` from the Next.js app. Its optional JSON body accepts `{ "gamesPerPair": 1, "minRestHours": 0 }`.
 
-The adapter finds the latest availability submission matching each league team name after trimming and lowercasing. It returns `409` and lists the teams that have not submitted availability, rather than scheduling them without one. Add a `league_team_id` foreign key to future submissions before supporting duplicate team names across leagues.
+The adapter finds the latest availability submission for each `league_teams.id`. It returns `409` and lists the teams that have not submitted availability, rather than scheduling them without one.

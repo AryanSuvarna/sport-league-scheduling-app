@@ -13,7 +13,7 @@ type LeagueRow = {
 type LeagueTeamRow = { id: string; name: string };
 
 type TeamAvailabilityRow = {
-  team_name: string;
+  team_id: string;
   available_start_date: string | null;
   available_end_date: string | null;
   available_dates: string[];
@@ -64,12 +64,12 @@ const weekdayNames = [
   "Saturday",
 ];
 
-function normalizeTeamName(name: string) {
-  return name.trim().toLowerCase();
-}
-
 function addMinutes(date: string, time: string, minutes: number) {
-  const value = new Date(`${date}T${time}`);
+  // Postgres `time` values can arrive as `18:00:00+00`; permit times are
+  // local wall-clock times, so discard the transport timezone suffix before
+  // constructing the slot timestamp.
+  const localTime = time.slice(0, 8);
+  const value = new Date(`${date}T${localTime}`);
   value.setMinutes(value.getMinutes() + minutes);
   return value;
 }
@@ -189,10 +189,12 @@ export async function POST(
     supabase
       .from("team_availability_submissions")
       .select(
-        "team_name, available_start_date, available_end_date, available_dates, blackout_dates, has_day_preference, preferred_days_of_week, has_time_preference, preferred_times_of_day, created_at",
+        "team_id, available_start_date, available_end_date, available_dates, blackout_dates, has_day_preference, preferred_days_of_week, has_time_preference, preferred_times_of_day, created_at",
       )
-      .eq("season_start_date", league.season_start_date)
-      .eq("season_end_date", league.season_end_date)
+      .in(
+        "team_id",
+        league.league_teams.map((team) => team.id),
+      )
       .order("created_at", { ascending: false })
       .returns<TeamAvailabilityRow[]>(),
     supabase
@@ -212,16 +214,15 @@ export async function POST(
     );
   }
 
-  const latestAvailabilityByName = new Map<string, TeamAvailabilityRow>();
+  const latestAvailabilityByTeamId = new Map<string, TeamAvailabilityRow>();
   for (const availability of teamAvailabilityResult.data ?? []) {
-    const key = normalizeTeamName(availability.team_name);
-    if (!latestAvailabilityByName.has(key)) {
-      latestAvailabilityByName.set(key, availability);
+    if (!latestAvailabilityByTeamId.has(availability.team_id)) {
+      latestAvailabilityByTeamId.set(availability.team_id, availability);
     }
   }
 
   const missingTeams = league.league_teams.filter(
-    (team) => !latestAvailabilityByName.has(normalizeTeamName(team.name)),
+    (team) => !latestAvailabilityByTeamId.has(team.id),
   );
   if (missingTeams.length > 0) {
     return NextResponse.json(
@@ -236,7 +237,7 @@ export async function POST(
   const availabilityByTeamId = new Map(
     league.league_teams.map((team) => [
       team.id,
-      latestAvailabilityByName.get(normalizeTeamName(team.name))!,
+      latestAvailabilityByTeamId.get(team.id)!,
     ]),
   );
   const slots = buildSlots(venueAvailabilityResult.data ?? [], league, availabilityByTeamId);
