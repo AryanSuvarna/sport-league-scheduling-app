@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { loadScheduleEditorData } from "@/lib/scheduling/editor-data";
 import { createClient } from "@/lib/supabase/server";
 
 type RouteContext = { params: Promise<{ leagueId: string; runId: string }> };
@@ -26,26 +27,18 @@ export async function POST(_request: Request, context: RouteContext) {
     return NextResponse.json({ message: "Schedule is already published.", schedule_run_id: run.id });
   }
 
-  // Archive the previous published version before publishing this run. The
-  // partial unique index in schedules.sql guarantees that only one published
-  // run can exist for a league.
-  const { error: archiveError } = await supabase
-    .from("league_schedule_runs")
-    .update({ schedule_status: "archived" })
-    .eq("league_id", leagueId)
-    .eq("schedule_status", "published");
-
-  if (archiveError) {
-    return NextResponse.json({ error: archiveError.message }, { status: 500 });
+  const editor = await loadScheduleEditorData(leagueId);
+  if (!editor || editor.run?.id !== runId) {
+    return NextResponse.json({ error: "This draft is not the active editable schedule." }, { status: 409 });
+  }
+  const hardIssues = editor.issues.filter((issue) => issue.severity === "conflict");
+  const unscheduled = editor.matches.filter((match) => !match.starts_at || !match.field_id);
+  if (hardIssues.length || unscheduled.length) {
+    return NextResponse.json({ error: "Resolve all conflicts and unscheduled fixtures before publishing.", conflicts: hardIssues.length, unscheduled: unscheduled.length }, { status: 409 });
   }
 
   const { data: publishedRun, error: publishError } = await supabase
-    .from("league_schedule_runs")
-    .update({ schedule_status: "published" })
-    .eq("id", runId)
-    .eq("league_id", leagueId)
-    .eq("schedule_status", "draft")
-    .select("id, schedule_status")
+    .rpc("publish_schedule_run", { target_run_id: runId, target_league_id: leagueId })
     .single<{ id: string; schedule_status: string }>();
 
   if (publishError || !publishedRun) {

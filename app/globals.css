@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "react-big-calendar/lib/css/react-big-calendar.css";
+@import "react-big-calendar/lib/addons/dragAndDrop/styles.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -46,6 +48,45 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@layer components {
+  .schedule-big-calendar .rbc-toolbar {
+    @apply mb-4 flex-wrap gap-2 text-sm;
+  }
+
+  .schedule-big-calendar .rbc-btn-group button {
+    @apply border-[#cfd8d0] bg-white px-3 py-2 text-[#39433d];
+  }
+
+  .schedule-big-calendar .rbc-btn-group button.rbc-active,
+  .schedule-big-calendar .rbc-btn-group button:hover {
+    @apply bg-[#e9f1eb] text-[#1f5b47];
+  }
+
+  .schedule-big-calendar .rbc-header,
+  .schedule-big-calendar .rbc-time-header-content,
+  .schedule-big-calendar .rbc-time-content,
+  .schedule-big-calendar .rbc-month-view,
+  .schedule-big-calendar .rbc-day-bg + .rbc-day-bg {
+    @apply border-[#d6ded5];
+  }
+
+  .schedule-big-calendar .rbc-event {
+    @apply rounded border-0 px-2 py-1 shadow-none;
+  }
+
+  .schedule-big-calendar .rbc-event-ready {
+    @apply bg-[#1f5b47] text-white;
+  }
+
+  .schedule-big-calendar .rbc-event-warning {
+    @apply bg-[#b77a1e] text-white;
+  }
+
+  .schedule-big-calendar .rbc-event-conflict {
+    @apply bg-[#a94939] text-white;
+  }
 }
 
 :root {

@@ -65,5 +65,10 @@ wheels/
 .installed.cfg
 *.egg
 
+# The Next.js application uses tracked TypeScript modules under lib/.
+!lib/
+!lib/scheduling/
+!lib/scheduling/*.ts
+
 # Virtual environments
 .venv

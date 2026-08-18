@@ -40,10 +40,17 @@ class ScheduleSettings(BaseModel):
     max_solve_seconds: int = Field(default=10, ge=1, le=60)
 
 
+class FixedMatch(BaseModel):
+    home_team_id: str = Field(min_length=1)
+    away_team_id: str = Field(min_length=1)
+    slot_id: str = Field(min_length=1)
+
+
 class ScheduleRequest(BaseModel):
     teams: list[Team] = Field(min_length=2)
     slots: list[Slot] = Field(min_length=1)
     settings: ScheduleSettings = Field(default_factory=ScheduleSettings)
+    fixed_matches: list[FixedMatch] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def identifiers_must_be_unique(self):
@@ -92,13 +99,37 @@ def build_schedule(request: ScheduleRequest) -> ScheduleResponse:
     if unknown_slots:
         raise ValueError(f"unknown slot ids: {', '.join(sorted(unknown_slots))}")
 
+    team_by_id = {team.id: team for team in request.teams}
+    fixed_pair_counts: dict[tuple[str, str], int] = defaultdict(int)
+    fixed_by_slot: dict[str, list[FixedMatch]] = defaultdict(list)
+    fixed_by_team: dict[str, list[FixedMatch]] = defaultdict(list)
+    for fixed in request.fixed_matches:
+        if fixed.home_team_id not in team_by_id or fixed.away_team_id not in team_by_id:
+            raise ValueError("fixed match references an unknown team")
+        if fixed.home_team_id == fixed.away_team_id or fixed.slot_id not in slot_by_id:
+            raise ValueError("fixed match has invalid teams or slot")
+        pair = tuple(sorted((fixed.home_team_id, fixed.away_team_id)))
+        fixed_pair_counts[pair] += 1
+        if fixed_pair_counts[pair] > request.settings.games_per_pair:
+            raise ValueError("too many fixed matches for a team pair")
+        fixed_by_slot[fixed.slot_id].append(fixed)
+        fixed_by_team[fixed.home_team_id].append(fixed)
+        fixed_by_team[fixed.away_team_id].append(fixed)
+    for slot_id, fixed in fixed_by_slot.items():
+        if len(fixed) > slot_by_id[slot_id].capacity:
+            raise ValueError("fixed matches exceed slot capacity")
+    for team_id, fixed in fixed_by_team.items():
+        for first, second in combinations(fixed, 2):
+            if slots_overlap_or_break_rest(slot_by_id[first.slot_id], slot_by_id[second.slot_id], request.settings.min_rest_hours):
+                raise ValueError(f"fixed matches conflict for team {team_id}")
+
     model = cp_model.CpModel()
     # Each pair is represented separately for each repeat. Two home/away directions
     # are provided so the solver can balance home games as a soft objective.
     fixtures = [
         (home, away, repeat)
         for home, away in combinations(request.teams, 2)
-        for repeat in range(request.settings.games_per_pair)
+        for repeat in range(request.settings.games_per_pair - fixed_pair_counts[tuple(sorted((home.id, away.id)))])
     ]
     decisions: dict[tuple[int, int, bool], cp_model.IntVar] = {}
     variables_by_slot: dict[str, list[cp_model.IntVar]] = defaultdict(list)
@@ -116,6 +147,11 @@ def build_schedule(request: ScheduleRequest) -> ScheduleResponse:
         for slot_index, slot in enumerate(request.slots):
             if (first_allowed is not None and slot.id not in first_allowed) or (
                 second_allowed is not None and slot.id not in second_allowed
+            ):
+                continue
+            if any(
+                slots_overlap_or_break_rest(slot, slot_by_id[fixed.slot_id], request.settings.min_rest_hours)
+                for fixed in [*fixed_by_team[first.id], *fixed_by_team[second.id]]
             ):
                 continue
             for first_is_home in (True, False):
@@ -141,7 +177,7 @@ def build_schedule(request: ScheduleRequest) -> ScheduleResponse:
         model.add_exactly_one(fixture_variables)
 
     for slot in request.slots:
-        model.add(sum(variables_by_slot[slot.id]) <= slot.capacity)
+        model.add(sum(variables_by_slot[slot.id]) <= slot.capacity - len(fixed_by_slot[slot.id]))
 
     # Capacity can be greater than one, but a team can never use more than one
     # simultaneous position within that capacity.
@@ -165,14 +201,20 @@ def build_schedule(request: ScheduleRequest) -> ScheduleResponse:
         date = slot_by_id[slot_id].starts_at.date()
         iso_year, iso_week, _ = date.isocalendar()
         weekly_variables[team_id, iso_year, iso_week].extend(variables)
-    for variables in weekly_variables.values():
-        model.add(sum(variables) <= request.settings.max_matches_per_team_per_week)
+    for (team_id, iso_year, iso_week), variables in weekly_variables.items():
+        fixed_count = sum(
+            1
+            for fixed in fixed_by_team[team_id]
+            if slot_by_id[fixed.slot_id].starts_at.date().isocalendar()[:2] == (iso_year, iso_week)
+        )
+        model.add(sum(variables) <= request.settings.max_matches_per_team_per_week - fixed_count)
 
     daily_variables: dict[tuple[str, date], list[cp_model.IntVar]] = defaultdict(list)
     for (team_id, slot_id), variables in variables_by_team_slot.items():
         daily_variables[team_id, slot_by_id[slot_id].starts_at.date()].extend(variables)
-    for variables in daily_variables.values():
-        model.add(sum(variables) <= request.settings.max_matches_per_team_per_day)
+    for (team_id, match_date), variables in daily_variables.items():
+        fixed_count = sum(1 for fixed in fixed_by_team[team_id] if slot_by_id[fixed.slot_id].starts_at.date() == match_date)
+        model.add(sum(variables) <= request.settings.max_matches_per_team_per_day - fixed_count)
 
     # Give home/away balance a lower priority than team preferences.
     home_counts: list[cp_model.IntVar] = []
@@ -206,7 +248,17 @@ def build_schedule(request: ScheduleRequest) -> ScheduleResponse:
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return ScheduleResponse(status="unknown", matches=[])
 
-    matches: list[ScheduledMatch] = []
+    matches: list[ScheduledMatch] = [
+        ScheduledMatch(
+            home_team_id=fixed.home_team_id,
+            away_team_id=fixed.away_team_id,
+            slot_id=fixed.slot_id,
+            field_id=slot_by_id[fixed.slot_id].field_id,
+            starts_at=slot_by_id[fixed.slot_id].starts_at,
+            ends_at=slot_by_id[fixed.slot_id].ends_at,
+        )
+        for fixed in request.fixed_matches
+    ]
     for fixture_index, (first, second, _) in enumerate(fixtures):
         for slot_index, slot in enumerate(request.slots):
             for first_is_home in (True, False):

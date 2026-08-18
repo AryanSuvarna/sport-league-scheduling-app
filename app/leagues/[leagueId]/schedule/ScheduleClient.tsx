@@ -1,487 +1,119 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import {
-  ArrowLeft,
-  ArrowRight,
-  CalendarDays,
-  LoaderCircle,
-  MapPin,
-} from "lucide-react";
-import { formatSeason } from "@/lib/leagues";
-import { createClient } from "@/lib/supabase/client";
+import dynamic from "next/dynamic";
+import { useMemo, useState, type ReactNode } from "react";
+import { AlertTriangle, ArrowLeft, CalendarDays, CheckCircle2, ChevronRight, CircleAlert, Lock, MapPin, Users } from "lucide-react";
+import type { ScheduleEditorData } from "@/lib/scheduling/editor-data";
+import type { EditorMatch, ScheduleIssue } from "@/lib/scheduling/editor";
 
-export type ScheduleLeague = {
-  id: string;
-  name: string;
-  sport: string;
-  season_start_date: string;
-  season_end_date: string;
-  league_teams: Array<{ id: string; name: string }>;
-};
+const BigCalendar = dynamic(() => import("./BigCalendar").then((module) => module.BigCalendar), {
+  ssr: false,
+  loading: () => <div className="rounded-md border border-[#d6ded5] bg-white p-8 text-center text-sm text-[#637066]">Loading calendar…</div>,
+});
 
-export type ScheduleMatch = {
-  id: string;
-  home_team_id: string;
-  away_team_id: string;
-  field_id: string;
-  starts_at: string;
-  ends_at: string;
-  match_status: "scheduled" | "confirmed" | "played" | "cancelled";
-  home_team_name: string;
-  away_team_name: string;
-  field_label: string;
-  venue_name: string;
-};
+type Props = { initialData: ScheduleEditorData };
+type Tab = "calendar" | "matches" | "teams" | "venues";
 
-export type ScheduleRun = {
-  id: string;
-  solver_status: string;
-  schedule_status: "draft" | "published" | "archived";
-  objective_value: number | null;
-  created_at: string;
-};
+export function ScheduleClient({ initialData }: Props) {
+  const [data, setData] = useState(initialData);
+  const [tab, setTab] = useState<Tab>("calendar");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [issuesOpen, setIssuesOpen] = useState(false);
+  const [teamFilter, setTeamFilter] = useState("all");
+  const [venueFilter, setVenueFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const selected = data.matches.find((match) => match.id === selectedId) ?? null;
+  const issueByMatch = useMemo(() => new Map(data.matches.map((match) => [match.id, data.issues.filter((issue) => issue.matchId === match.id)])), [data]);
+  const visibleMatches = useMemo(() => data.matches.filter((match) => {
+    const issues = issueByMatch.get(match.id) ?? [];
+    return (teamFilter === "all" || match.home_team_id === teamFilter || match.away_team_id === teamFilter) &&
+      (venueFilter === "all" || match.field_id === venueFilter) &&
+      (statusFilter === "all" || (statusFilter === "conflict" && issues.some((item) => item.severity === "conflict")) || (statusFilter === "warning" && issues.some((item) => item.severity === "warning")) || (statusFilter === "clear" && issues.length === 0));
+  }), [data.matches, issueByMatch, statusFilter, teamFilter, venueFilter]);
+  const conflicts = data.issues.filter((item) => item.severity === "conflict").length;
+  const warnings = data.issues.filter((item) => item.severity === "warning").length;
 
-type GenerateScheduleResult = {
-  error?: string;
-  missing_teams?: string[];
-  matches?: unknown[];
-};
+  async function refresh() {
+    const response = await fetch(`/api/leagues/${data.league.id}/schedule/editor`);
+    const next = await response.json();
+    if (!response.ok) throw new Error(next.error ?? "Could not refresh schedule.");
+    setData(next);
+  }
+  async function clonePublished() {
+    if (!data.run) return;
+    setBusy(true); setMessage("");
+    try { const response = await fetch(`/api/leagues/${data.league.id}/schedule/${data.run.id}/clone`, { method: "POST" }); const result = await response.json(); if (!response.ok) throw new Error(result.error); await refresh(); setMessage("Editable draft created."); } catch (error) { setMessage(error instanceof Error ? error.message : "Could not create draft."); } finally { setBusy(false); }
+  }
+  async function runAction(action: "undo" | "redo" | "optimize" | "publish") {
+    if (!data.run) return;
+    setBusy(true); setMessage("");
+    try {
+      const endpoint = action === "undo" || action === "redo"
+        ? `/api/leagues/${data.league.id}/schedule/${data.run.id}/history`
+        : `/api/leagues/${data.league.id}/schedule/${data.run.id}/${action}`;
+      const response = await fetch(endpoint, { method: "POST", headers: action === "undo" || action === "redo" ? { "Content-Type": "application/json" } : undefined, body: action === "undo" || action === "redo" ? JSON.stringify({ action }) : undefined });
+      const result = await response.json().catch(() => null) as { error?: string } | null;
+      if (!response.ok) throw new Error(result?.error ?? `Could not ${action} schedule.`);
+      await refresh(); setMessage(action === "optimize" ? "Created an optimized draft that preserved locked matches." : `Schedule ${action} complete.`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : `Could not ${action} schedule.`); } finally { setBusy(false); }
+  }
+  async function moveMatch(matchId: string, startsAt: string, fieldId: string) {
+    setBusy(true); setMessage("");
+    try {
+      const response = await fetch(`/api/leagues/${data.league.id}/schedule/matches/${matchId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ startsAt, fieldId }) });
+      const result = await response.json().catch(() => null) as { error?: string; issues?: Array<{ detail: string }> } | null;
+      if (!response.ok) throw new Error(result?.issues?.[0]?.detail ?? result?.error ?? "Could not move match.");
+      await refresh(); setMessage("Match moved.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not move match."); } finally { setBusy(false); }
+  }
+  function focusIssue(matchId: string) { setSelectedId(matchId); setIssuesOpen(false); }
+  const unscheduled = data.matches.filter((match) => !match.starts_at || !match.field_id);
 
-type LifecycleResult = {
-  error?: string;
-  schedule_status?: ScheduleRun["schedule_status"];
-};
+  return <main className="min-h-screen bg-[#f6f7f4] text-[#18211c]"><div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
+    <header className="flex flex-col gap-5 border-b border-[#d6ded5] pb-5 lg:flex-row lg:items-end lg:justify-between">
+      <div><Link href={`/leagues/${data.league.id}`} className="inline-flex items-center gap-2 text-sm font-semibold text-[#1f5b47]"><ArrowLeft className="h-4 w-4" />{data.league.name}</Link><div className="mt-3 flex items-center gap-3"><h1 className="text-3xl font-semibold">Schedule editor</h1>{data.run ? <span className={`rounded-full px-3 py-1 text-xs font-bold uppercase ${data.run.schedule_status === "published" ? "bg-[#e9f1eb] text-[#1f5b47]" : "bg-[#f8ecd6] text-[#815615]"}`}>{data.run.schedule_status}</span> : null}</div><p className="mt-1 text-sm text-[#637066]">{data.league.sport} · {data.matches.length} fixtures</p></div>
+      <div className="flex flex-wrap gap-2"><button onClick={() => void runAction("undo")} disabled={!data.run || busy || data.run.schedule_status !== "draft"} className="h-10 rounded-md border border-[#cfd8d0] bg-white px-3 text-sm font-semibold text-[#1f5b47] disabled:text-[#9aa39c]">Undo</button><button onClick={() => void runAction("redo")} disabled={!data.run || busy || data.run.schedule_status !== "draft"} className="h-10 rounded-md border border-[#cfd8d0] bg-white px-3 text-sm font-semibold text-[#1f5b47] disabled:text-[#9aa39c]">Redo</button>{data.run?.schedule_status === "published" ? <button onClick={() => void clonePublished()} disabled={busy} className="h-10 rounded-md bg-[#1f5b47] px-4 text-sm font-semibold text-white">{busy ? "Creating..." : "Create editable draft"}</button> : <><button onClick={() => void runAction("optimize")} disabled={!data.run || busy} className="h-10 rounded-md border border-[#cfd8d0] bg-white px-4 text-sm font-semibold text-[#1f5b47] disabled:opacity-45">{busy ? "Working..." : "Optimize schedule"}</button><button onClick={() => void runAction("publish")} disabled={!data.run || busy || conflicts > 0 || unscheduled.length > 0} className="h-10 rounded-md bg-[#1f5b47] px-4 text-sm font-semibold text-white disabled:opacity-45">Publish schedule</button></>}</div>
+    </header>{message ? <p className="mt-3 text-sm text-[#9a3d31]">{message}</p> : null}
+    {!data.run ? <EmptySchedule leagueId={data.league.id} onGenerated={() => void refresh()} onMessage={setMessage} /> : <>
+      <div className="mt-5 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between"><nav className="flex gap-1 rounded-md border border-[#d6ded5] bg-white p-1">{(["calendar", "matches", "teams", "venues"] as Tab[]).map((item) => <button key={item} onClick={() => setTab(item)} className={`rounded px-4 py-2 text-sm font-semibold capitalize ${tab === item ? "bg-[#e9f1eb] text-[#1f5b47]" : "text-[#637066]"}`}>{item}</button>)}</nav><div className="flex flex-wrap gap-2"><Filter value={teamFilter} onChange={setTeamFilter}><option value="all">All teams</option>{data.league.teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</Filter><Filter value={venueFilter} onChange={setVenueFilter}><option value="all">All venues</option>{data.fields.map((field) => <option key={field.id} value={field.id}>{field.venue_name} / {field.label}</option>)}</Filter><Filter value={statusFilter} onChange={setStatusFilter}><option value="all">All health</option><option value="conflict">Conflicts</option><option value="warning">Warnings</option><option value="clear">Clear</option></Filter><button onClick={() => setIssuesOpen(true)} className="inline-flex items-center gap-2 rounded-md border border-[#d6ded5] bg-white px-3 text-sm font-semibold"><CircleAlert className="h-4 w-4 text-[#b44632]" />{data.matches.length - conflicts - warnings} valid · {warnings} warnings · {conflicts} conflicts</button></div></div>
+      <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_280px]"> <div className="min-w-0">{tab === "calendar" ? <BigCalendar matches={visibleMatches} issueByMatch={issueByMatch} onSelect={setSelectedId} disabled={busy || data.run.schedule_status !== "draft"} onMove={moveMatch} /> : tab === "matches" ? <MatchesTable matches={visibleMatches} issueByMatch={issueByMatch} onSelect={setSelectedId} /> : tab === "teams" ? <TeamsView data={data} issueByMatch={issueByMatch} onSelect={setSelectedId} /> : <VenuesView data={data} issueByMatch={issueByMatch} onSelect={setSelectedId} />}</div><Unscheduled matches={unscheduled} counts={data.validSlotCounts} onSelect={setSelectedId} /></section>
+    </>}
+  </div>{issuesOpen ? <IssuesPanel issues={data.issues} matches={data.matches} onClose={() => setIssuesOpen(false)} onSelect={focusIssue} /> : null}{selected ? <MatchDrawer match={selected} data={data} issues={issueByMatch.get(selected.id) ?? []} onClose={() => setSelectedId(null)} onSaved={() => void refresh()} onMessage={setMessage} /> : null}</main>;
+}
 
-type ScheduleClientProps = {
-  league: ScheduleLeague;
-  initialRun: ScheduleRun | null;
-  initialMatches: ScheduleMatch[];
-  initialLoadError: string;
-};
-
-export function ScheduleClient({
-  league,
-  initialRun,
-  initialMatches,
-  initialLoadError,
-}: ScheduleClientProps) {
-  const supabase = useMemo(() => createClient(), []);
-  const [message, setMessage] = useState(initialLoadError);
+function Filter({ value, onChange, children }: { value: string; onChange: (value: string) => void; children: ReactNode }) { return <select value={value} onChange={(event) => onChange(event.target.value)} className="h-10 rounded-md border border-[#cfd8d0] bg-white px-3 text-sm text-[#39433d]">{children}</select>; }
+function EmptySchedule({ leagueId, onGenerated, onMessage }: { leagueId: string; onGenerated: () => void; onMessage: (message: string) => void }) {
+  const [gamesPerPair, setGamesPerPair] = useState("1");
+  const [maxMatchesPerTeamPerDay, setMaxMatchesPerTeamPerDay] = useState("1");
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [scheduleRun, setScheduleRun] = useState<ScheduleRun | null>(initialRun);
-  const [matches, setMatches] = useState<ScheduleMatch[]>(initialMatches);
-  const [options, setOptions] = useState({
-    gamesPerPair: "1",
-    maxMatchesPerTeamPerDay: "1",
-  });
 
-  async function loadLatestSchedule() {
-    setIsLoading(true);
-
-    const { data: run, error: runError } = await supabase
-      .from("league_schedule_runs")
-      .select("id, solver_status, schedule_status, objective_value, created_at")
-      .eq("league_id", league.id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle<ScheduleRun>();
-
-    if (runError) {
-      setMessage(`Could not load the latest schedule: ${runError.message}`);
-      setIsLoading(false);
-      return;
-    }
-
-    if (!run) {
-      setScheduleRun(null);
-      setMatches([]);
-      setIsLoading(false);
-      return;
-    }
-
-    const { data: rawMatches, error: matchesError } = await supabase
-      .from("league_matches")
-      .select("id, home_team_id, away_team_id, field_id, starts_at, ends_at, match_status")
-      .eq("schedule_run_id", run.id)
-      .order("starts_at", { ascending: true });
-
-    if (matchesError) {
-      setMessage(`Could not load schedule matches: ${matchesError.message}`);
-      setIsLoading(false);
-      return;
-    }
-
-    const fieldIds = [...new Set((rawMatches ?? []).map((match) => match.field_id))];
-    const { data: fields, error: fieldsError } = fieldIds.length
-      ? await supabase
-          .from("fields")
-          .select("id, label, venues(name)")
-          .in("id", fieldIds)
-      : { data: [], error: null };
-
-    if (fieldsError) {
-      setMessage(`Could not load schedule fields: ${fieldsError.message}`);
-      setIsLoading(false);
-      return;
-    }
-
-    const teamNames = new Map(league.league_teams.map((team) => [team.id, team.name]));
-    const fieldRows = (fields ?? []) as unknown as Array<{
-      id: string;
-      label: string;
-      venues: { name: string } | null;
-    }>;
-    const fieldById = new Map(
-      fieldRows.map((field) => [
-        field.id,
-        { label: field.label, venue: field.venues?.name ?? "Venue" },
-      ]),
-    );
-
-    setScheduleRun(run);
-    setMatches(
-      (rawMatches ?? []).map((match) => {
-        const field = fieldById.get(match.field_id);
-        return {
-          ...match,
-          home_team_name: teamNames.get(match.home_team_id) ?? "Unknown team",
-          away_team_name: teamNames.get(match.away_team_id) ?? "Unknown team",
-          field_label: field?.label ?? "Field",
-          venue_name: field?.venue ?? "Venue",
-        };
-      }),
-    );
-    setIsLoading(false);
-  }
-
-  async function generateSchedule() {
-    const gamesPerPair = Number(options.gamesPerPair);
-    const maxMatchesPerTeamPerDay = Number(options.maxMatchesPerTeamPerDay);
-
-    if (!Number.isInteger(gamesPerPair) || gamesPerPair < 1 || gamesPerPair > 10) {
-      setMessage("Games per pair must be a whole number from 1 to 10.");
-      return;
-    }
-
-    if (
-      !Number.isInteger(maxMatchesPerTeamPerDay) ||
-      maxMatchesPerTeamPerDay < 1 ||
-      maxMatchesPerTeamPerDay > 4
-    ) {
-      setMessage("Max matches per team per day must be a whole number from 1 to 4.");
-      return;
-    }
-
-    setIsGenerating(true);
-    setMessage("");
-
+  async function generate() {
+    const games = Number(gamesPerPair);
+    const dailyMax = Number(maxMatchesPerTeamPerDay);
+    if (!Number.isInteger(games) || games < 1 || games > 10) { onMessage("Games per pair must be a whole number from 1 to 10."); return; }
+    if (!Number.isInteger(dailyMax) || dailyMax < 1 || dailyMax > 4) { onMessage("Max matches per team per day must be a whole number from 1 to 4."); return; }
+    setIsGenerating(true); onMessage("");
     try {
-      const response = await fetch(`/api/leagues/${league.id}/schedule`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gamesPerPair, maxMatchesPerTeamPerDay }),
-      });
-      const result = (await response.json().catch(() => null)) as GenerateScheduleResult | null;
-
-      if (!response.ok) {
-        const missingTeams = result?.missing_teams?.join(", ");
-        setMessage(
-          missingTeams
-            ? `${result?.error ?? "Could not generate schedule."} Missing: ${missingTeams}`
-            : result?.error ?? "Could not generate schedule.",
-        );
-        return;
-      }
-
-      setMessage(`Schedule generated with ${result?.matches?.length ?? 0} matches.`);
-      await loadLatestSchedule();
-    } catch {
-      setMessage("Could not reach the scheduling service.");
-    } finally {
-      setIsGenerating(false);
-    }
+      const response = await fetch(`/api/leagues/${leagueId}/schedule`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gamesPerPair: games, maxMatchesPerTeamPerDay: dailyMax }) });
+      const result = await response.json().catch(() => null) as { error?: string; missing_teams?: string[]; matches?: unknown[] } | null;
+      if (!response.ok) { const missing = result?.missing_teams?.join(", "); throw new Error(missing ? `${result?.error ?? "Could not generate schedule."} Missing: ${missing}` : result?.error ?? "Could not generate schedule."); }
+      onMessage(`Schedule generated with ${result?.matches?.length ?? 0} matches.`); onGenerated();
+    } catch (error) { onMessage(error instanceof Error ? error.message : "Could not reach the scheduling service."); } finally { setIsGenerating(false); }
   }
 
-  async function updateScheduleLifecycle(action: "publish" | "archive") {
-    if (!scheduleRun) return;
-
-    setIsLoading(true);
-    setMessage("");
-    try {
-      const response = await fetch(
-        `/api/leagues/${league.id}/schedule/${scheduleRun.id}/${action}`,
-        { method: "POST" },
-      );
-      const result = (await response.json().catch(() => null)) as LifecycleResult | null;
-
-      if (!response.ok) {
-        setMessage(result?.error ?? `Could not ${action} schedule.`);
-        return;
-      }
-
-      setMessage(action === "publish" ? "Schedule published." : "Schedule archived.");
-      await loadLatestSchedule();
-    } catch {
-      setMessage(`Could not ${action} schedule.`);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function updateMatchStatus(
-    matchId: string,
-    matchStatus: ScheduleMatch["match_status"],
-  ) {
-    try {
-      const response = await fetch(`/api/leagues/${league.id}/schedule/matches/${matchId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ matchStatus }),
-      });
-      const result = (await response.json().catch(() => null)) as { error?: string } | null;
-
-      if (!response.ok) {
-        setMessage(result?.error ?? "Could not update match status.");
-        return;
-      }
-
-      setMatches((currentMatches) =>
-        currentMatches.map((match) =>
-          match.id === matchId ? { ...match, match_status: matchStatus } : match,
-        ),
-      );
-    } catch {
-      setMessage("Could not update match status.");
-    }
-  }
-
-  return (
-    <main className="min-h-screen bg-[#f6f7f4] text-[#18211c]">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 px-4 py-6 sm:px-6 lg:px-8">
-        <header className="border-b border-[#d6ded5] pb-6">
-          <Link
-            href={`/leagues/${league.id}`}
-            className="inline-flex items-center gap-2 text-sm font-semibold text-[#1f5b47] transition hover:text-[#164333]"
-          >
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-            {league.name}
-          </Link>
-          <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-sm font-medium text-[#637066]">Scheduling</p>
-              <h1 className="mt-2 text-3xl font-semibold tracking-normal text-[#16211b] sm:text-4xl">
-                League schedule
-              </h1>
-              <p className="mt-2 text-sm text-[#637066]">
-                {league.sport} / {formatSeason(league.season_start_date, league.season_end_date)}
-              </p>
-            </div>
-            <Link
-              href="/venue-availability"
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-[#c7d3ca] bg-white px-5 text-sm font-semibold text-[#1f5b47] transition hover:border-[#9fb5a8] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2"
-            >
-              Venue availability
-              <ArrowRight className="h-4 w-4" aria-hidden="true" />
-            </Link>
-          </div>
-          {message ? <p className="mt-4 text-sm text-[#637066]">{message}</p> : null}
-        </header>
-
-        <section className="rounded-md border border-[#d6ded5] bg-white p-5 shadow-sm">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h2 className="text-xl font-semibold text-[#18211c]">Generate schedule</h2>
-              <p className="mt-1 max-w-2xl text-sm leading-6 text-[#637066]">
-                Create fixtures from captain availability and venue permits. Previous runs remain saved.
-              </p>
-            </div>
-            {scheduleRun ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex w-fit rounded-full bg-[#e9f1eb] px-3 py-1 text-xs font-semibold uppercase text-[#1f5b47]">
-                  {scheduleRun.schedule_status}
-                </span>
-                <span className="text-xs text-[#637066]">Solver: {scheduleRun.solver_status}</span>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="mt-5 grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(220px,0.9fr)] sm:items-end">
-            <label className="block text-sm font-medium text-[#39433d]">
-              Games per pair
-              <input
-                type="number"
-                min="1"
-                max="10"
-                value={options.gamesPerPair}
-                onChange={(event) =>
-                  setOptions((current) => ({ ...current, gamesPerPair: event.target.value }))
-                }
-                className="mt-2 h-11 w-full rounded-md border border-[#cfd8d0] bg-white px-3 text-sm text-[#18211c] outline-none transition focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/15"
-              />
-              <span className="mt-1 block text-xs font-normal text-[#637066]">
-                1 = single round robin; 2 = home and away.
-              </span>
-            </label>
-            <label className="block text-sm font-medium text-[#39433d]">
-              Max matches per team per day
-              <input
-                type="number"
-                min="1"
-                max="4"
-                value={options.maxMatchesPerTeamPerDay}
-                onChange={(event) =>
-                  setOptions((current) => ({
-                    ...current,
-                    maxMatchesPerTeamPerDay: event.target.value,
-                  }))
-                }
-                className="mt-2 h-11 w-full rounded-md border border-[#cfd8d0] bg-white px-3 text-sm text-[#18211c] outline-none transition focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/15"
-              />
-              <span className="mt-1 block text-xs font-normal text-[#637066]">
-                Default is 1 to avoid same-day doubleheaders.
-              </span>
-            </label>
-            <div className="flex flex-col gap-3 sm:self-end">
-              {scheduleRun?.schedule_status === "draft" ? (
-                <button
-                  type="button"
-                  onClick={() => void updateScheduleLifecycle("publish")}
-                  disabled={isGenerating || isLoading}
-                  className="inline-flex h-11 w-full items-center justify-center rounded-md border border-[#c7d3ca] bg-white px-5 text-sm font-semibold text-[#1f5b47] transition hover:border-[#9fb5a8] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Publish draft
-                </button>
-              ) : null}
-              {scheduleRun?.schedule_status === "published" ? (
-                <button
-                  type="button"
-                  onClick={() => void updateScheduleLifecycle("archive")}
-                  disabled={isGenerating || isLoading}
-                  className="inline-flex h-11 w-full items-center justify-center rounded-md border border-[#e1c3bd] bg-white px-5 text-sm font-semibold text-[#9a3d31] transition hover:border-[#c99388] focus:outline-none focus:ring-2 focus:ring-[#9a3d31] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Archive published
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={generateSchedule}
-                disabled={isGenerating}
-                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-[#1f5b47] px-5 text-sm font-semibold text-white transition hover:bg-[#164333] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isGenerating ? <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-                {isGenerating ? "Generating..." : scheduleRun ? "Regenerate schedule" : "Generate schedule"}
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <section className="rounded-md border border-[#d6ded5] bg-white p-5 shadow-sm">
-          {isLoading ? (
-            <p className="text-sm text-[#637066]">Loading saved schedule...</p>
-          ) : matches.length > 0 ? (
-            <>
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#e1e7e0] pb-4">
-                <div className="flex items-center gap-2">
-                  <CalendarDays className="h-5 w-5 text-[#1f5b47]" aria-hidden="true" />
-                  <h2 className="text-lg font-semibold text-[#18211c]">
-                    {matches.length} scheduled matches
-                  </h2>
-                </div>
-                <span className="text-xs text-[#637066]">
-                  Generated {formatScheduleDate(scheduleRun?.created_at ?? "")}
-                </span>
-              </div>
-              <div className="divide-y divide-[#e1e7e0]">
-                {matches.map((match) => (
-                  <div
-                    key={match.id}
-                    className="grid gap-3 py-4 sm:grid-cols-[150px_minmax(0,1fr)_minmax(0,1fr)_200px_150px] sm:items-center"
-                  >
-                    <div>
-                      <p className="text-sm font-semibold text-[#18211c]">
-                        {formatScheduleDate(match.starts_at)}
-                      </p>
-                      <p className="mt-1 text-sm text-[#637066]">
-                        {formatScheduleTime(match.starts_at)} – {formatScheduleTime(match.ends_at)}
-                      </p>
-                    </div>
-                    <TeamCell label="Home" value={match.home_team_name} />
-                    <TeamCell label="Away" value={match.away_team_name} />
-                    <div className="min-w-0">
-                      <span className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase text-[#637066]">
-                        <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
-                        Venue
-                      </span>
-                      <p className="truncate text-sm font-medium text-[#39433d]">
-                        {match.venue_name} / {match.field_label}
-                      </p>
-                    </div>
-                    <label className="text-sm text-[#637066]">
-                      <span className="mb-1 block text-xs font-semibold uppercase">Status</span>
-                      <select
-                        value={match.match_status}
-                        onChange={(event) =>
-                          void updateMatchStatus(
-                            match.id,
-                            event.target.value as ScheduleMatch["match_status"],
-                          )
-                        }
-                        className="h-9 w-full rounded-md border border-[#cfd8d0] bg-white px-2 text-sm font-medium text-[#39433d] outline-none focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/15"
-                      >
-                        <option value="scheduled">Scheduled</option>
-                        <option value="confirmed">Confirmed</option>
-                        <option value="played">Played</option>
-                        <option value="cancelled">Cancelled</option>
-                      </select>
-                    </label>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="rounded-md border border-dashed border-[#cfd8d0] bg-[#fbfcfa] px-4 py-6 text-sm text-[#637066]">
-              No schedule has been generated yet. Confirm that every team has submitted availability and that venue permits cover the season.
-            </div>
-          )}
-        </section>
-      </div>
-    </main>
-  );
+  return <section className="mt-7 rounded-md border border-dashed border-[#cfd8d0] bg-white px-6 py-12 text-center"><CalendarDays className="mx-auto h-8 w-8 text-[#1f5b47]" /><h2 className="mt-3 text-lg font-semibold">Create your first schedule draft</h2><p className="mx-auto mt-1 max-w-xl text-sm text-[#637066]">Generate fixtures from the team and venue availability you have collected. You can review and edit the resulting draft in this workspace.</p><div className="mx-auto mt-6 grid max-w-xl gap-3 text-left sm:grid-cols-2"><label className="text-sm font-medium text-[#39433d]">Games per pair<input type="number" min="1" max="10" value={gamesPerPair} onChange={(event) => setGamesPerPair(event.target.value)} className="mt-1 h-10 w-full rounded border border-[#cfd8d0] px-3" /></label><label className="text-sm font-medium text-[#39433d]">Max matches per team per day<input type="number" min="1" max="4" value={maxMatchesPerTeamPerDay} onChange={(event) => setMaxMatchesPerTeamPerDay(event.target.value)} className="mt-1 h-10 w-full rounded border border-[#cfd8d0] px-3" /></label></div><div className="mt-5 flex flex-wrap justify-center gap-3"><button onClick={() => void generate()} disabled={isGenerating} className="inline-flex h-11 items-center justify-center rounded-md bg-[#1f5b47] px-5 text-sm font-semibold text-white disabled:opacity-60">{isGenerating ? "Generating schedule..." : "Generate schedule"}</button><Link href={`/leagues/${leagueId}`} className="inline-flex h-11 items-center justify-center rounded-md border border-[#c7d3ca] bg-white px-5 text-sm font-semibold text-[#1f5b47]">Back to league</Link></div></section>;
 }
+function Unscheduled({ matches, counts, onSelect }: { matches: EditorMatch[]; counts: Record<string, number>; onSelect: (id: string) => void }) { return <aside className="rounded-md border border-[#d6ded5] bg-white p-4"><h2 className="font-semibold">Unscheduled matches</h2><p className="mt-1 text-xs text-[#637066]">Prioritize fixtures with fewer available slots.</p><div className="mt-3 space-y-2">{matches.sort((a, b) => (counts[a.id] ?? 0) - (counts[b.id] ?? 0)).map((match) => <button key={match.id} onClick={() => onSelect(match.id)} className="w-full rounded border border-[#e1e7e0] p-3 text-left text-sm"><strong>{match.home_team_name} vs {match.away_team_name}</strong><span className={`mt-1 block text-xs ${(counts[match.id] ?? 0) < 3 ? "text-[#b44632]" : "text-[#1f5b47]"}`}>{counts[match.id] ?? 0} available slots</span></button>)}{matches.length === 0 ? <p className="py-4 text-sm text-[#637066]">Every fixture has a placement.</p> : null}</div></aside>; }
+function MatchesTable({ matches, issueByMatch, onSelect }: { matches: EditorMatch[]; issueByMatch: Map<string, ScheduleIssue[]>; onSelect: (id: string) => void }) { return <div className="overflow-x-auto rounded-md border border-[#d6ded5] bg-white"><table className="w-full min-w-[700px] text-left text-sm"><thead className="border-b bg-[#fbfcfa] text-xs uppercase text-[#637066]"><tr>{["Date", "Time", "Home", "Away", "Venue", "Status"].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr></thead><tbody>{matches.map((match) => <tr key={match.id} onClick={() => onSelect(match.id)} className="cursor-pointer border-b last:border-0 hover:bg-[#fbfcfa]"><td className="px-4 py-3">{match.starts_at ? formatDate(match.starts_at) : "Unscheduled"}</td><td className="px-4 py-3">{formatTime(match.starts_at)}</td><td className="px-4 py-3 font-semibold">{match.home_team_name}</td><td className="px-4 py-3 font-semibold">{match.away_team_name}</td><td className="px-4 py-3">{match.venue_name ?? "—"}</td><td className="px-4 py-3"><Health issues={issueByMatch.get(match.id) ?? []} /></td></tr>)}</tbody></table></div>; }
+function TeamsView({ data, issueByMatch, onSelect }: { data: ScheduleEditorData; issueByMatch: Map<string, ScheduleIssue[]>; onSelect: (id: string) => void }) { return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{data.league.teams.map((team) => { const matches = data.matches.filter((match) => match.home_team_id === team.id || match.away_team_id === team.id); return <button onClick={() => matches[0] && onSelect(matches[0].id)} key={team.id} className="rounded-md border border-[#d6ded5] bg-white p-4 text-left"><Users className="h-5 w-5 text-[#1f5b47]" /><h2 className="mt-3 font-semibold">{team.name}</h2><p className="mt-1 text-sm text-[#637066]">{matches.length} total matches · {matches.filter((match) => (issueByMatch.get(match.id) ?? []).length).length} needing review</p></button>; })}</div>; }
+function VenuesView({ data, issueByMatch, onSelect }: { data: ScheduleEditorData; issueByMatch: Map<string, ScheduleIssue[]>; onSelect: (id: string) => void }) { return <div className="grid gap-3 sm:grid-cols-2">{data.fields.map((field) => { const matches = data.matches.filter((match) => match.field_id === field.id); return <button onClick={() => matches[0] && onSelect(matches[0].id)} key={field.id} className="rounded-md border border-[#d6ded5] bg-white p-4 text-left"><MapPin className="h-5 w-5 text-[#1f5b47]" /><h2 className="mt-3 font-semibold">{field.venue_name} / {field.label}</h2><p className="mt-1 text-sm text-[#637066]">{matches.length} occupied slots · {data.permits.filter((permit) => permit.field_id === field.id).length} permitted windows</p><Health issues={matches.flatMap((match) => issueByMatch.get(match.id) ?? [])} /></button>; })}</div>; }
+function Health({ issues }: { issues: ScheduleIssue[] }) { const conflict = issues.some((issue) => issue.severity === "conflict"); return <span className={`inline-flex items-center gap-1 text-xs font-semibold ${conflict ? "text-[#b44632]" : issues.length ? "text-[#a66c13]" : "text-[#1f5b47]"}`}>{conflict ? <CircleAlert className="h-3.5 w-3.5" /> : issues.length ? <AlertTriangle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}{conflict ? "Conflict" : issues.length ? "Warning" : "Ready"}</span>; }
+function IssuesPanel({ issues, matches, onClose, onSelect }: { issues: ScheduleIssue[]; matches: EditorMatch[]; onClose: () => void; onSelect: (id: string) => void }) { return <div className="fixed inset-0 z-40 bg-[#18211c]/25" onClick={onClose}><aside onClick={(event) => event.stopPropagation()} className="absolute right-0 top-0 h-full w-full max-w-md overflow-y-auto bg-white p-5 shadow-xl"><div className="flex items-center justify-between"><h2 className="text-lg font-semibold">Schedule issues</h2><button onClick={onClose} className="text-sm font-semibold text-[#1f5b47]">Close</button></div><div className="mt-5 space-y-2">{issues.map((issue) => { const match = matches.find((item) => item.id === issue.matchId); return <button key={issue.id} onClick={() => onSelect(issue.matchId)} className="w-full rounded-md border border-[#e1e7e0] p-3 text-left"><Health issues={[issue]} /><p className="mt-2 font-semibold">{match?.home_team_name} vs {match?.away_team_name}</p><p className="mt-1 text-sm text-[#637066]">{issue.detail}</p><span className="mt-2 inline-flex items-center text-xs font-semibold text-[#1f5b47]">Review match <ChevronRight className="h-3.5 w-3.5" /></span></button>; })}{issues.length === 0 ? <p className="py-8 text-center text-sm text-[#637066]">No issues found.</p> : null}</div></aside></div>; }
+function MatchDrawer({ match, data, issues, onClose, onSaved, onMessage }: { match: EditorMatch; data: ScheduleEditorData; issues: ScheduleIssue[]; onClose: () => void; onSaved: () => void; onMessage: (value: string) => void }) { const [date, setDate] = useState(match.starts_at?.slice(0, 10) ?? ""); const [time, setTime] = useState(match.starts_at?.slice(11, 16) ?? ""); const [fieldId, setFieldId] = useState(match.field_id ?? ""); const [locked, setLocked] = useState(match.is_locked); const [saving, setSaving] = useState(false); const readOnly = data.run?.schedule_status !== "draft"; async function save() { setSaving(true); onMessage(""); try { const response = await fetch(`/api/leagues/${data.league.id}/schedule/matches/${match.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ startsAt: date && time ? `${date}T${time}:00` : null, fieldId: fieldId || null, isLocked: locked }) }); const result = await response.json(); if (!response.ok) throw new Error(result.issues?.[0]?.detail ?? result.error); onSaved(); onClose(); } catch (error) { onMessage(error instanceof Error ? error.message : "Could not save match."); } finally { setSaving(false); } } return <div className="fixed inset-0 z-30 bg-[#18211c]/20" onClick={onClose}><aside onClick={(event) => event.stopPropagation()} className="absolute right-0 top-0 h-full w-full max-w-lg overflow-y-auto bg-white p-5 shadow-xl"><div className="flex justify-between"><div><p className="text-xs font-bold uppercase text-[#637066]">Match editor</p><h2 className="mt-1 text-xl font-semibold">{match.home_team_name} vs {match.away_team_name}</h2></div><button onClick={onClose} className="text-sm font-semibold text-[#1f5b47]">Close</button></div><section className="mt-6 rounded-md bg-[#fbfcfa] p-4"><h3 className="font-semibold">Assignment</h3><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="text-sm">Date<input disabled={readOnly} type="date" value={date} onChange={(event) => setDate(event.target.value)} className="mt-1 h-10 w-full rounded border border-[#cfd8d0] px-2" /></label><label className="text-sm">Time<input disabled={readOnly} type="time" value={time} onChange={(event) => setTime(event.target.value)} className="mt-1 h-10 w-full rounded border border-[#cfd8d0] px-2" /></label></div><label className="mt-3 block text-sm">Venue / field<select disabled={readOnly} value={fieldId} onChange={(event) => setFieldId(event.target.value)} className="mt-1 h-10 w-full rounded border border-[#cfd8d0] px-2"><option value="">Choose a field</option>{data.fields.map((field) => <option key={field.id} value={field.id}>{field.venue_name} / {field.label}</option>)}</select></label><label className="mt-4 flex items-center gap-2 text-sm font-semibold"><input disabled={readOnly} type="checkbox" checked={locked} onChange={(event) => setLocked(event.target.checked)} /> <Lock className="h-4 w-4" />Lock this match</label></section><section className="mt-5"><h3 className="font-semibold">Constraint feedback</h3><div className="mt-3 space-y-2">{issues.map((issue) => <div key={issue.id} className={`rounded border p-3 text-sm ${issue.severity === "conflict" ? "border-[#e1c3bd] bg-[#fff8f6]" : "border-[#ead7af] bg-[#fffaf0]"}`}><strong>{issue.title}</strong><p className="mt-1 text-[#637066]">{issue.detail}</p></div>)}{issues.length === 0 ? <div className="rounded border border-[#cfe0d3] bg-[#f5faf6] p-3 text-sm text-[#1f5b47]"><CheckCircle2 className="mr-1 inline h-4 w-4" />This assignment meets the current constraints.</div> : null}</div></section>{!readOnly ? <SuggestedTimes leagueId={data.league.id} match={match} fields={data.fields} onChoose={(suggestion) => { setDate(suggestion.startsAt.slice(0, 10)); setTime(suggestion.startsAt.slice(11, 16)); setFieldId(suggestion.fieldId); }} /> : null}{readOnly ? <p className="mt-6 text-sm text-[#637066]">Published schedules are read-only. Create an editable draft to make changes.</p> : <button onClick={() => void save()} disabled={saving} className="mt-6 h-11 w-full rounded-md bg-[#1f5b47] text-sm font-semibold text-white disabled:opacity-60">{saving ? "Saving..." : "Save changes"}</button>}</aside></div>; }
 
-function formatScheduleDate(value: string) {
-  if (!value) return "";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(date);
-}
-
-function formatScheduleTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function TeamCell({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <span className="mb-1 block text-xs font-semibold uppercase text-[#637066] sm:hidden">
-        {label}
-      </span>
-      <p className="truncate text-sm font-semibold text-[#18211c]">{value}</p>
-    </div>
-  );
-}
+function SuggestedTimes({ leagueId, match, fields, onChoose }: { leagueId: string; match: EditorMatch; fields: ScheduleEditorData["fields"]; onChoose: (slot: { startsAt: string; fieldId: string }) => void }) { const [slots, setSlots] = useState<Array<{ startsAt: string; fieldId: string; warningCount: number }>>([]); const [loading, setLoading] = useState(false); async function load() { setLoading(true); try { const response = await fetch(`/api/leagues/${leagueId}/schedule/matches/${match.id}/suggestions`); const result = await response.json() as { suggestions?: Array<{ startsAt: string; fieldId: string; warningCount: number }> }; if (response.ok) setSlots(result.suggestions ?? []); } finally { setLoading(false); } } const fieldById = new Map(fields.map((field) => [field.id, field])); return <section className="mt-5 border-t border-[#e1e7e0] pt-5"><div className="flex items-center justify-between"><h3 className="font-semibold">Suggested times</h3><button onClick={() => void load()} className="text-sm font-semibold text-[#1f5b47]">{loading ? "Finding..." : "Find another time"}</button></div>{slots.length ? <div className="mt-3 space-y-2">{slots.map((slot) => <button key={`${slot.fieldId}:${slot.startsAt}`} onClick={() => onChoose(slot)} className="w-full rounded border border-[#cfe0d3] p-3 text-left text-sm"><strong>{formatDate(slot.startsAt)} · {formatTime(slot.startsAt)}</strong><span className="mt-1 block text-[#637066]">{fieldById.get(slot.fieldId)?.venue_name} / {fieldById.get(slot.fieldId)?.label} · {slot.warningCount ? `${slot.warningCount} warnings` : "No conflicts"}</span></button>)}</div> : null}</section>; }
+function formatDate(value: string | null) { if (!value) return "—"; return new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" }).format(new Date(value)); }
+function formatTime(value: string | null) { if (!value) return "—"; return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(value)); }

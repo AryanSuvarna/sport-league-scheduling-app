@@ -147,3 +147,22 @@ class SchedulerTests(TestCase):
         )
 
         self.assertEqual(build_schedule(request).status, "infeasible")
+
+    def test_preserves_fixed_match_when_optimizing_remaining_fixtures(self):
+        request = ScheduleRequest.model_validate(
+            {
+                "teams": [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}, {"id": "c", "name": "C"}],
+                "slots": [
+                    {"id": "s1", "field_id": "f1", "starts_at": "2026-05-01T18:00:00Z", "ends_at": "2026-05-01T20:00:00Z"},
+                    {"id": "s2", "field_id": "f1", "starts_at": "2026-05-08T18:00:00Z", "ends_at": "2026-05-08T20:00:00Z"},
+                    {"id": "s3", "field_id": "f1", "starts_at": "2026-05-15T18:00:00Z", "ends_at": "2026-05-15T20:00:00Z"},
+                ],
+                "fixed_matches": [{"home_team_id": "a", "away_team_id": "b", "slot_id": "s1"}],
+            }
+        )
+
+        response = build_schedule(request)
+
+        self.assertEqual(response.status, "optimal")
+        self.assertEqual(len(response.matches), 3)
+        self.assertTrue(any(match.home_team_id == "a" and match.away_team_id == "b" and match.slot_id == "s1" for match in response.matches))
