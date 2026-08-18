@@ -205,6 +205,7 @@ export async function POST(
     supabase
       .from("venue_availability")
       .select("id, field_id, permit_date, permit_start_time, permit_end_time, capacity")
+      .eq("league_id", leagueId)
       .gte("permit_date", league.season_start_date)
       .lte("permit_date", league.season_end_date)
       .order("permit_date", { ascending: true })
@@ -300,7 +301,16 @@ export async function POST(
   }
 
   if (solverResponse.status === "infeasible" || solverResponse.status === "unknown") {
-    return NextResponse.json(solverResponse, { status: 422 });
+    return NextResponse.json(
+      {
+        error:
+          solverResponse.status === "infeasible"
+            ? "No valid schedule fits the current team availability, venue permits, and match limits."
+            : "The scheduler could not determine a valid schedule. Please try again or adjust the constraints.",
+        detail: solverResponse,
+      },
+      { status: 422 },
+    );
   }
 
   const { data: scheduleRun, error: scheduleRunError } = await supabase
