@@ -3,6 +3,7 @@
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useMemo, useState, type ReactNode } from "react";
+import { toast } from "react-hot-toast";
 import { AlertTriangle, ArrowLeft, CalendarDays, CheckCircle2, ChevronRight, CircleAlert, Lock, MapPin, Users } from "lucide-react";
 import type { ScheduleEditorData } from "@/lib/scheduling/editor-data";
 import type { EditorMatch, ScheduleIssue } from "@/lib/scheduling/editor";
@@ -23,7 +24,6 @@ export function ScheduleClient({ initialData }: Props) {
   const [teamFilter, setTeamFilter] = useState("all");
   const [venueFilter, setVenueFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const selected = data.matches.find((match) => match.id === selectedId) ?? null;
   const issueByMatch = useMemo(() => new Map(data.matches.map((match) => [match.id, data.issues.filter((issue) => issue.matchId === match.id)])), [data]);
@@ -44,12 +44,12 @@ export function ScheduleClient({ initialData }: Props) {
   }
   async function clonePublished() {
     if (!data.run) return;
-    setBusy(true); setMessage("");
-    try { const response = await fetch(`/api/leagues/${data.league.id}/schedule/${data.run.id}/clone`, { method: "POST" }); const result = await response.json(); if (!response.ok) throw new Error(result.error); await refresh(); setMessage("Editable draft created."); } catch (error) { setMessage(error instanceof Error ? error.message : "Could not create draft."); } finally { setBusy(false); }
+    setBusy(true);
+    try { const response = await fetch(`/api/leagues/${data.league.id}/schedule/${data.run.id}/clone`, { method: "POST" }); const result = await response.json(); if (!response.ok) throw new Error(result.error); await refresh(); toast.success("Editable draft created."); } catch (error) { toast.error(error instanceof Error ? error.message : "Could not create draft."); } finally { setBusy(false); }
   }
   async function runAction(action: "undo" | "redo" | "optimize" | "publish") {
     if (!data.run) return;
-    setBusy(true); setMessage("");
+    setBusy(true);
     try {
       const endpoint = action === "undo" || action === "redo"
         ? `/api/leagues/${data.league.id}/schedule/${data.run.id}/history`
@@ -57,17 +57,17 @@ export function ScheduleClient({ initialData }: Props) {
       const response = await fetch(endpoint, { method: "POST", headers: action === "undo" || action === "redo" ? { "Content-Type": "application/json" } : undefined, body: action === "undo" || action === "redo" ? JSON.stringify({ action }) : undefined });
       const result = await response.json().catch(() => null) as { error?: string } | null;
       if (!response.ok) throw new Error(result?.error ?? `Could not ${action} schedule.`);
-      await refresh(); setMessage(action === "optimize" ? "Created an optimized draft that preserved locked matches." : `Schedule ${action} complete.`);
-    } catch (error) { setMessage(error instanceof Error ? error.message : `Could not ${action} schedule.`); } finally { setBusy(false); }
+      await refresh(); toast.success(action === "optimize" ? "Created an optimized draft that preserved locked matches." : `Schedule ${action} complete.`);
+    } catch (error) { toast.error(error instanceof Error ? error.message : `Could not ${action} schedule.`); } finally { setBusy(false); }
   }
   async function moveMatch(matchId: string, startsAt: string, fieldId: string) {
-    setBusy(true); setMessage("");
+    setBusy(true);
     try {
       const response = await fetch(`/api/leagues/${data.league.id}/schedule/matches/${matchId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ startsAt, fieldId }) });
       const result = await response.json().catch(() => null) as { error?: string; issues?: Array<{ detail: string }> } | null;
       if (!response.ok) throw new Error(result?.issues?.[0]?.detail ?? result?.error ?? "Could not move match.");
-      await refresh(); setMessage("Match moved.");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not move match."); } finally { setBusy(false); }
+      await refresh(); toast.success("Match moved.");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Could not move match."); } finally { setBusy(false); }
   }
   function focusIssue(matchId: string) { setSelectedId(matchId); setIssuesOpen(false); }
   const unscheduled = data.matches.filter((match) => !match.starts_at || !match.field_id);
@@ -76,16 +76,16 @@ export function ScheduleClient({ initialData }: Props) {
     <header className="flex flex-col gap-5 border-b border-[#d6ded5] pb-5 lg:flex-row lg:items-end lg:justify-between">
       <div><Link href={`/leagues/${data.league.id}`} className="inline-flex items-center gap-2 text-sm font-semibold text-[#1f5b47]"><ArrowLeft className="h-4 w-4" />{data.league.name}</Link><div className="mt-3 flex items-center gap-3"><h1 className="text-3xl font-semibold">Schedule editor</h1>{data.run ? <span className={`rounded-full px-3 py-1 text-xs font-bold uppercase ${data.run.schedule_status === "published" ? "bg-[#e9f1eb] text-[#1f5b47]" : "bg-[#f8ecd6] text-[#815615]"}`}>{data.run.schedule_status}</span> : null}</div><p className="mt-1 text-sm text-[#637066]">{data.league.sport} · {data.matches.length} fixtures</p></div>
       <div className="flex flex-wrap gap-2"><button onClick={() => void runAction("undo")} disabled={!data.run || busy || data.run.schedule_status !== "draft"} className="h-10 rounded-md border border-[#cfd8d0] bg-white px-3 text-sm font-semibold text-[#1f5b47] disabled:text-[#9aa39c]">Undo</button><button onClick={() => void runAction("redo")} disabled={!data.run || busy || data.run.schedule_status !== "draft"} className="h-10 rounded-md border border-[#cfd8d0] bg-white px-3 text-sm font-semibold text-[#1f5b47] disabled:text-[#9aa39c]">Redo</button>{data.run?.schedule_status === "published" ? <button onClick={() => void clonePublished()} disabled={busy} className="h-10 rounded-md bg-[#1f5b47] px-4 text-sm font-semibold text-white">{busy ? "Creating..." : "Create editable draft"}</button> : <><button onClick={() => void runAction("optimize")} disabled={!data.run || busy} className="h-10 rounded-md border border-[#cfd8d0] bg-white px-4 text-sm font-semibold text-[#1f5b47] disabled:opacity-45">{busy ? "Working..." : "Optimize schedule"}</button><button onClick={() => void runAction("publish")} disabled={!data.run || busy || conflicts > 0 || unscheduled.length > 0} className="h-10 rounded-md bg-[#1f5b47] px-4 text-sm font-semibold text-white disabled:opacity-45">Publish schedule</button></>}</div>
-    </header>{message ? <p className="mt-3 text-sm text-[#9a3d31]">{message}</p> : null}
-    {!data.run ? <EmptySchedule leagueId={data.league.id} onGenerated={() => void refresh()} onMessage={setMessage} /> : <>
+    </header>
+    {!data.run ? <EmptySchedule leagueId={data.league.id} onGenerated={() => void refresh()} /> : <>
       <div className="mt-5 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between"><nav className="flex gap-1 rounded-md border border-[#d6ded5] bg-white p-1">{(["calendar", "matches", "teams", "venues"] as Tab[]).map((item) => <button key={item} onClick={() => setTab(item)} className={`rounded px-4 py-2 text-sm font-semibold capitalize ${tab === item ? "bg-[#e9f1eb] text-[#1f5b47]" : "text-[#637066]"}`}>{item}</button>)}</nav><div className="flex flex-wrap gap-2"><Filter value={teamFilter} onChange={setTeamFilter}><option value="all">All teams</option>{data.league.teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</Filter><Filter value={venueFilter} onChange={setVenueFilter}><option value="all">All venues</option>{data.fields.map((field) => <option key={field.id} value={field.id}>{field.venue_name} / {field.label}</option>)}</Filter><Filter value={statusFilter} onChange={setStatusFilter}><option value="all">All health</option><option value="conflict">Conflicts</option><option value="warning">Warnings</option><option value="clear">Clear</option></Filter><button onClick={() => setIssuesOpen(true)} className="inline-flex items-center gap-2 rounded-md border border-[#d6ded5] bg-white px-3 text-sm font-semibold"><CircleAlert className="h-4 w-4 text-[#b44632]" />{data.matches.length - conflicts - warnings} valid · {warnings} warnings · {conflicts} conflicts</button></div></div>
       <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_280px]"> <div className="min-w-0">{tab === "calendar" ? <BigCalendar matches={visibleMatches} issueByMatch={issueByMatch} onSelect={setSelectedId} disabled={busy || data.run.schedule_status !== "draft"} onMove={moveMatch} /> : tab === "matches" ? <MatchesTable matches={visibleMatches} issueByMatch={issueByMatch} onSelect={setSelectedId} /> : tab === "teams" ? <TeamsView data={data} issueByMatch={issueByMatch} onSelect={setSelectedId} /> : <VenuesView data={data} issueByMatch={issueByMatch} onSelect={setSelectedId} />}</div><Unscheduled matches={unscheduled} counts={data.validSlotCounts} onSelect={setSelectedId} /></section>
     </>}
-  </div>{issuesOpen ? <IssuesPanel issues={data.issues} matches={data.matches} onClose={() => setIssuesOpen(false)} onSelect={focusIssue} /> : null}{selected ? <MatchDrawer match={selected} data={data} issues={issueByMatch.get(selected.id) ?? []} onClose={() => setSelectedId(null)} onSaved={() => void refresh()} onMessage={setMessage} /> : null}</main>;
+  </div>{issuesOpen ? <IssuesPanel issues={data.issues} matches={data.matches} onClose={() => setIssuesOpen(false)} onSelect={focusIssue} /> : null}{selected ? <MatchDrawer match={selected} data={data} issues={issueByMatch.get(selected.id) ?? []} onClose={() => setSelectedId(null)} onSaved={() => { void refresh(); toast.success("Match changes saved."); }} onMessage={(value) => { if (value) toast.error(value); }} /> : null}</main>;
 }
 
 function Filter({ value, onChange, children }: { value: string; onChange: (value: string) => void; children: ReactNode }) { return <select value={value} onChange={(event) => onChange(event.target.value)} className="h-10 rounded-md border border-[#cfd8d0] bg-white px-3 text-sm text-[#39433d]">{children}</select>; }
-function EmptySchedule({ leagueId, onGenerated, onMessage }: { leagueId: string; onGenerated: () => void; onMessage: (message: string) => void }) {
+function EmptySchedule({ leagueId, onGenerated }: { leagueId: string; onGenerated: () => void }) {
   const [gamesPerPair, setGamesPerPair] = useState("1");
   const [maxMatchesPerTeamPerDay, setMaxMatchesPerTeamPerDay] = useState("1");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -93,15 +93,15 @@ function EmptySchedule({ leagueId, onGenerated, onMessage }: { leagueId: string;
   async function generate() {
     const games = Number(gamesPerPair);
     const dailyMax = Number(maxMatchesPerTeamPerDay);
-    if (!Number.isInteger(games) || games < 1 || games > 10) { onMessage("Games per pair must be a whole number from 1 to 10."); return; }
-    if (!Number.isInteger(dailyMax) || dailyMax < 1 || dailyMax > 4) { onMessage("Max matches per team per day must be a whole number from 1 to 4."); return; }
-    setIsGenerating(true); onMessage("");
+    if (!Number.isInteger(games) || games < 1 || games > 10) { toast.error("Games per pair must be a whole number from 1 to 10."); return; }
+    if (!Number.isInteger(dailyMax) || dailyMax < 1 || dailyMax > 4) { toast.error("Max matches per team per day must be a whole number from 1 to 4."); return; }
+    setIsGenerating(true); const toastId = toast.loading("Generating schedule…");
     try {
       const response = await fetch(`/api/leagues/${leagueId}/schedule`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gamesPerPair: games, maxMatchesPerTeamPerDay: dailyMax }) });
       const result = await response.json().catch(() => null) as { error?: string; missing_teams?: string[]; matches?: unknown[] } | null;
       if (!response.ok) { const missing = result?.missing_teams?.join(", "); throw new Error(missing ? `${result?.error ?? "Could not generate schedule."} Missing: ${missing}` : result?.error ?? "Could not generate schedule."); }
-      onMessage(`Schedule generated with ${result?.matches?.length ?? 0} matches.`); onGenerated();
-    } catch (error) { onMessage(error instanceof Error ? error.message : "Could not reach the scheduling service."); } finally { setIsGenerating(false); }
+      toast.success(`Schedule generated with ${result?.matches?.length ?? 0} matches.`, { id: toastId }); onGenerated();
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Could not reach the scheduling service.", { id: toastId }); } finally { setIsGenerating(false); }
   }
 
   return <section className="mt-7 rounded-md border border-dashed border-[#cfd8d0] bg-white px-6 py-12 text-center"><CalendarDays className="mx-auto h-8 w-8 text-[#1f5b47]" /><h2 className="mt-3 text-lg font-semibold">Create your first schedule draft</h2><p className="mx-auto mt-1 max-w-xl text-sm text-[#637066]">Generate fixtures from the team and venue availability you have collected. You can review and edit the resulting draft in this workspace.</p><div className="mx-auto mt-6 grid max-w-xl gap-3 text-left sm:grid-cols-2"><label className="text-sm font-medium text-[#39433d]">Games per pair<input type="number" min="1" max="10" value={gamesPerPair} onChange={(event) => setGamesPerPair(event.target.value)} className="mt-1 h-10 w-full rounded border border-[#cfd8d0] px-3" /></label><label className="text-sm font-medium text-[#39433d]">Max matches per team per day<input type="number" min="1" max="4" value={maxMatchesPerTeamPerDay} onChange={(event) => setMaxMatchesPerTeamPerDay(event.target.value)} className="mt-1 h-10 w-full rounded border border-[#cfd8d0] px-3" /></label></div><div className="mt-5 flex flex-wrap justify-center gap-3"><button onClick={() => void generate()} disabled={isGenerating} className="inline-flex h-11 items-center justify-center rounded-md bg-[#1f5b47] px-5 text-sm font-semibold text-white disabled:opacity-60">{isGenerating ? "Generating schedule..." : "Generate schedule"}</button><Link href={`/leagues/${leagueId}`} className="inline-flex h-11 items-center justify-center rounded-md border border-[#c7d3ca] bg-white px-5 text-sm font-semibold text-[#1f5b47]">Back to league</Link></div></section>;
