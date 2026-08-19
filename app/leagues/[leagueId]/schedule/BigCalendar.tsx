@@ -28,7 +28,7 @@ type Props = {
 
 export function BigCalendar({ matches, issueByMatch, disabled, onSelect, onMove }: Props) {
   const [date, setDate] = useState(() => new Date());
-  const [view, setView] = useState<View>("week");
+  const [view, setView] = useState<View>("month");
   const events = useMemo<CalendarEvent[]>(
     () => matches.flatMap((match) => {
       if (!match.starts_at || !match.ends_at || !match.field_id) return [];
