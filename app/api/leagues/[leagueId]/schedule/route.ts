@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { buildSolverSlots } from "@/lib/scheduling/slots";
 import { createClient } from "@/lib/supabase/server";
 
 type LeagueRow = {
@@ -54,103 +55,6 @@ type GenerateOptions = {
   maxMatchesPerTeamPerDay?: number;
   minRestHours?: number;
 };
-
-const weekdayNames = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-];
-
-function addMinutes(date: string, time: string, minutes: number) {
-  // Postgres `time` values can arrive as `18:00:00+00`; permit times are
-  // local wall-clock times, so discard the transport timezone suffix before
-  // constructing the slot timestamp.
-  const localTime = time.slice(0, 8);
-  const value = new Date(`${date}T${localTime}`);
-  value.setMinutes(value.getMinutes() + minutes);
-  return value;
-}
-
-function formatLocalDateTime(date: Date) {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-    date.getHours(),
-  )}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-}
-
-function teamCanPlayOnDate(availability: TeamAvailabilityRow, date: string) {
-  if (availability.blackout_dates.includes(date)) {
-    return false;
-  }
-
-  const insideRange =
-    availability.available_start_date !== null &&
-    availability.available_end_date !== null &&
-    date >= availability.available_start_date &&
-    date <= availability.available_end_date;
-
-  return insideRange || availability.available_dates.includes(date);
-}
-
-function teamPrefersSlot(
-  availability: TeamAvailabilityRow,
-  date: string,
-  startsAt: Date,
-) {
-  const day = weekdayNames[startsAt.getDay()];
-  const hour = startsAt.getHours();
-  const timeOfDay = hour < 12 ? "Morning" : hour < 17 ? "Afternoon" : "Evening";
-  const prefersDay =
-    !availability.has_day_preference || availability.preferred_days_of_week.includes(day);
-  const prefersTime =
-    !availability.has_time_preference || availability.preferred_times_of_day.includes(timeOfDay);
-
-  return teamCanPlayOnDate(availability, date) && prefersDay && prefersTime;
-}
-
-function buildSlots(
-  permits: VenueAvailabilityRow[],
-  league: LeagueRow,
-  availabilityByTeamId: Map<string, TeamAvailabilityRow>,
-) {
-  return permits.flatMap((permit) => {
-    const permitStart = addMinutes(permit.permit_date, permit.permit_start_time, 0);
-    const permitEnd = addMinutes(permit.permit_date, permit.permit_end_time, 0);
-    const slots = [];
-
-    for (
-      let start = permitStart;
-      start.getTime() + league.match_duration_minutes * 60_000 <= permitEnd.getTime();
-      start = new Date(start.getTime() + league.match_duration_minutes * 60_000)
-    ) {
-      const end = new Date(start.getTime() + league.match_duration_minutes * 60_000);
-      const id = `${permit.id}:${formatLocalDateTime(start)}`;
-      const date = permit.permit_date;
-      slots.push({
-        id,
-        field_id: permit.field_id,
-        source_permit_id: permit.id,
-        starts_at: formatLocalDateTime(start),
-        ends_at: formatLocalDateTime(end),
-        capacity: permit.capacity,
-        date,
-        start,
-        allowed_team_ids: [...availabilityByTeamId.entries()]
-          .filter(([, availability]) => teamCanPlayOnDate(availability, date))
-          .map(([teamId]) => teamId),
-        preferred_team_ids: [...availabilityByTeamId.entries()]
-          .filter(([, availability]) => teamPrefersSlot(availability, date, start))
-          .map(([teamId]) => teamId),
-      });
-    }
-
-    return slots;
-  });
-}
 
 export async function POST(
   request: Request,
@@ -246,7 +150,7 @@ export async function POST(
       latestAvailabilityByTeamId.get(team.id)!,
     ]),
   );
-  const slots = buildSlots(venueAvailabilityResult.data ?? [], league, availabilityByTeamId);
+  const slots = buildSolverSlots(venueAvailabilityResult.data ?? [], league.match_duration_minutes, availabilityByTeamId);
   if (slots.length === 0) {
     return NextResponse.json(
       { error: "No venue permits contain a complete match-duration slot in this league season." },
