@@ -51,17 +51,15 @@ export async function loadScheduleEditorData(leagueId: string): Promise<Schedule
     .maybeSingle<LeagueRow>();
   if (!league) return null;
 
-  const { data: draft } = await supabase
+  const { data: activeRuns } = await supabase
     .from("league_schedule_runs")
     .select("id, solver_status, schedule_status, objective_value, created_at, parent_schedule_run_id, input_snapshot")
-    .eq("league_id", leagueId).eq("schedule_status", "draft").order("created_at", { ascending: false }).limit(1)
-    .maybeSingle<EditorRun>();
-  const { data: published } = draft ? { data: null } : await supabase
-    .from("league_schedule_runs")
-    .select("id, solver_status, schedule_status, objective_value, created_at, parent_schedule_run_id, input_snapshot")
-    .eq("league_id", leagueId).eq("schedule_status", "published").order("created_at", { ascending: false }).limit(1)
-    .maybeSingle<EditorRun>();
-  const run = draft ?? published;
+    .eq("league_id", leagueId)
+    .in("schedule_status", ["draft", "published"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .returns<EditorRun[]>();
+  const run = activeRuns?.[0] ?? null;
 
   const [matchesResult, permitsResult, availabilityResult] = await Promise.all([
     run ? supabase.from("league_matches").select("id, home_team_id, away_team_id, field_id, venue_availability_id, starts_at, ends_at, match_status, is_locked").eq("schedule_run_id", run.id).order("starts_at", { ascending: true }) : Promise.resolve({ data: [], error: null }),
