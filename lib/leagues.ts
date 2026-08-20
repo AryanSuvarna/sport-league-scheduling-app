@@ -4,6 +4,7 @@ export type LeagueTeam = {
   captain_name: string;
   captain_phone: string;
   captain_email: string | null;
+  has_submitted_availability?: boolean;
 };
 
 export type League = {

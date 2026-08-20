@@ -41,5 +41,18 @@ export default async function LeaguePage({ params }: LeaguePageProps) {
     notFound();
   }
 
-  return <LeagueDetailClient league={league} />;
+  const { data: availabilitySubmissions } = await supabase
+    .from("team_availability_submissions")
+    .select("team_id")
+    .in("team_id", league.league_teams.map((team) => team.id));
+  const submittedTeamIds = new Set((availabilitySubmissions ?? []).map((submission) => submission.team_id));
+  const leagueWithAvailability = {
+    ...league,
+    league_teams: league.league_teams.map((team) => ({
+      ...team,
+      has_submitted_availability: submittedTeamIds.has(team.id),
+    })),
+  };
+
+  return <LeagueDetailClient league={leagueWithAvailability} />;
 }

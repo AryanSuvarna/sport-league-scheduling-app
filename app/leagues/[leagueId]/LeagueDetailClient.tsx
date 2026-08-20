@@ -30,6 +30,7 @@ type EditableTeam = {
   captainName: string;
   captainPhone: string;
   captainEmail: string;
+  hasSubmittedAvailability: boolean;
   isNew: boolean;
 };
 
@@ -91,6 +92,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
         captainName: "",
         captainPhone: "",
         captainEmail: "",
+        hasSubmittedAvailability: false,
         isNew: true,
       },
     ]);
@@ -282,6 +284,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
   }
 
   async function sendWhatsAppInvite(team: EditableTeam) {
+    if (team.hasSubmittedAvailability) return;
     setMessage("");
     setSendingInviteTeamId(team.id);
 
@@ -559,11 +562,11 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
                           <button
                             type="button"
                             onClick={() => sendWhatsAppInvite(team)}
-                            disabled={sendingInviteTeamId === team.id}
-                            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-[#c7d3ca] bg-white px-4 text-sm font-semibold text-[#1f5b47] transition hover:border-[#9fb5a8] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                            disabled={team.hasSubmittedAvailability || sendingInviteTeamId === team.id}
+                            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-[#c7d3ca] bg-white px-4 text-sm font-semibold text-[#1f5b47] transition hover:border-[#9fb5a8] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-45"
                           >
                             <MessageCircle className="h-4 w-4" aria-hidden="true" />
-                            {sendingInviteTeamId === team.id ? "Sending..." : "Invite"}
+                            {team.hasSubmittedAvailability ? "Submitted" : sendingInviteTeamId === team.id ? "Sending..." : "Invite"}
                           </button>
                         </div>
                       </div>
@@ -613,6 +616,7 @@ function formatEditableTeam(team: LeagueTeam): EditableTeam {
     captainName: team.captain_name,
     captainPhone: team.captain_phone,
     captainEmail: team.captain_email || "",
+    hasSubmittedAvailability: Boolean(team.has_submitted_availability),
     isNew: false,
   };
 }
