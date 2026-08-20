@@ -18,7 +18,16 @@ export type EditorRun = {
   objective_value: number | null;
   created_at: string;
   parent_schedule_run_id: string | null;
-  input_snapshot: { settings?: { min_rest_hours?: number; max_matches_per_team_per_week?: number } } | null;
+  input_snapshot: {
+    settings?: {
+      games_per_pair?: number;
+      max_matches_per_team_per_week?: number;
+      max_matches_per_team_per_day?: number;
+      min_rest_hours?: number;
+    };
+    excluded_dates?: string[];
+    soft_avoid_dates?: string[];
+  } | null;
 };
 
 export type ScheduleEditorData = {
