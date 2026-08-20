@@ -21,6 +21,7 @@ type TeamAvailabilityRow = {
   available_end_date: string | null;
   available_dates: string[];
   blackout_dates: string[];
+  recurring_blackouts: Array<{ day_of_week: string; time_of_day: string }>;
   has_day_preference: boolean;
   preferred_days_of_week: string[];
   has_time_preference: boolean;
@@ -118,7 +119,7 @@ export async function POST(
     supabase
       .from("team_availability_submissions")
       .select(
-        "team_id, available_start_date, available_end_date, available_dates, blackout_dates, has_day_preference, preferred_days_of_week, has_time_preference, preferred_times_of_day, created_at",
+        "team_id, available_start_date, available_end_date, available_dates, blackout_dates, recurring_blackouts, has_day_preference, preferred_days_of_week, has_time_preference, preferred_times_of_day, created_at",
       )
       .in(
         "team_id",

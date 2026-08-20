@@ -11,6 +11,7 @@ create table if not exists public.team_availability_submissions (
   has_time_preference boolean not null default false,
   preferred_times_of_day text[] not null default '{}',
   blackout_dates date[] not null default '{}',
+  recurring_blackouts jsonb not null default '[]'::jsonb,
   notes text not null default '',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -54,6 +55,9 @@ alter table public.team_availability_submissions
 
 alter table public.team_availability_submissions
   alter column team_id set not null;
+
+alter table public.team_availability_submissions
+  add column if not exists recurring_blackouts jsonb not null default '[]'::jsonb;
 
 alter table public.team_availability_submissions
   drop column if exists team_name,

@@ -20,7 +20,7 @@ export async function POST(_request: Request, context: RouteContext<"/api/league
   const supabase = await createClient();
   const { data: availabilityRows, error: availabilityError } = await supabase
     .from("team_availability_submissions")
-    .select("team_id, available_start_date, available_end_date, available_dates, blackout_dates, has_day_preference, preferred_days_of_week, has_time_preference, preferred_times_of_day, created_at")
+    .select("team_id, available_start_date, available_end_date, available_dates, blackout_dates, recurring_blackouts, has_day_preference, preferred_days_of_week, has_time_preference, preferred_times_of_day, created_at")
     .in("team_id", payload.teams.map((team) => team.id))
     .order("created_at", { ascending: false });
   if (availabilityError) return NextResponse.json({ error: availabilityError.message }, { status: 500 });

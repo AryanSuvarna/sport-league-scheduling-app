@@ -9,7 +9,7 @@ export async function GET(_request: Request, context: RouteContext<"/api/leagues
   const match = editor?.matches.find((item) => item.id === matchId);
   if (!editor || !match) return NextResponse.json({ error: "Match not found." }, { status: 404 });
   const supabase = await createClient();
-  const { data: rows, error } = await supabase.from("team_availability_submissions").select("team_id, available_start_date, available_end_date, available_dates, blackout_dates, has_day_preference, preferred_days_of_week, has_time_preference, preferred_times_of_day, created_at").in("team_id", editor.league.teams.map((team) => team.id)).order("created_at", { ascending: false });
+  const { data: rows, error } = await supabase.from("team_availability_submissions").select("team_id, available_start_date, available_end_date, available_dates, blackout_dates, recurring_blackouts, has_day_preference, preferred_days_of_week, has_time_preference, preferred_times_of_day, created_at").in("team_id", editor.league.teams.map((team) => team.id)).order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const availabilityByTeamId = new Map<string, EditorAvailability>();
   for (const row of (rows ?? []) as EditorAvailability[]) if (!availabilityByTeamId.has(row.team_id)) availabilityByTeamId.set(row.team_id, row);

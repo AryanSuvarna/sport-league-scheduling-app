@@ -28,6 +28,10 @@ type Weekday =
   | "Friday"
   | "Saturday";
 type TimeOfDay = "Morning" | "Afternoon" | "Evening";
+type RecurringBlackout = {
+  dayOfWeek: Weekday | "Any day";
+  timeOfDay: TimeOfDay | "All day";
+};
 
 type TeamCaptainForm = {
   leagueId: string;
@@ -40,6 +44,7 @@ type TeamCaptainForm = {
   hasTimePreference: boolean;
   preferredTimesOfDay: TimeOfDay[];
   blackoutDates: string[];
+  recurringBlackouts: RecurringBlackout[];
   notes: string;
 };
 
@@ -81,6 +86,7 @@ const initialForm: TeamCaptainForm = {
   hasTimePreference: false,
   preferredTimesOfDay: [],
   blackoutDates: [""],
+  recurringBlackouts: [],
   notes: "",
 };
 
@@ -205,6 +211,33 @@ export default function TeamCaptainPage() {
         [field]: nextDates.length > 0 ? nextDates : [""],
       };
     });
+  }
+
+  function addRecurringBlackout() {
+    setForm((currentForm) => ({
+      ...currentForm,
+      recurringBlackouts: [...currentForm.recurringBlackouts, { dayOfWeek: "Sunday", timeOfDay: "Morning" }],
+    }));
+  }
+
+  function updateRecurringBlackout(
+    index: number,
+    field: keyof RecurringBlackout,
+    value: RecurringBlackout[keyof RecurringBlackout],
+  ) {
+    setForm((currentForm) => ({
+      ...currentForm,
+      recurringBlackouts: currentForm.recurringBlackouts.map((blackout, blackoutIndex) =>
+        blackoutIndex === index ? { ...blackout, [field]: value } : blackout,
+      ),
+    }));
+  }
+
+  function removeRecurringBlackout(index: number) {
+    setForm((currentForm) => ({
+      ...currentForm,
+      recurringBlackouts: currentForm.recurringBlackouts.filter((_, blackoutIndex) => blackoutIndex !== index),
+    }));
   }
 
   function setAnyDayPreference() {
@@ -332,6 +365,10 @@ export default function TeamCaptainPage() {
       has_time_preference: form.hasTimePreference,
       preferred_times_of_day: form.preferredTimesOfDay,
       blackout_dates: blackoutDates,
+      recurring_blackouts: form.recurringBlackouts.map((blackout) => ({
+        day_of_week: blackout.dayOfWeek,
+        time_of_day: blackout.timeOfDay,
+      })),
       notes: form.notes.trim(),
     });
 
@@ -499,6 +536,50 @@ export default function TeamCaptainPage() {
               >
                 <Plus aria-hidden="true" size={16} />
                 Add available date
+              </button>
+            </div>
+          </section>
+
+          <section className="grid gap-4 border-t border-[#e1e7e2] pt-5">
+            <div className="flex items-center gap-2">
+              <CircleAlert aria-hidden="true" size={18} className="text-[#8a3829]" />
+              <div>
+                <h2 className="text-lg font-semibold text-[#16211b]">Hard recurring unavailability</h2>
+                <p className="mt-1 text-sm text-[#58635c]">Never schedule our team during these recurring periods. These restrictions can make a schedule infeasible.</p>
+              </div>
+            </div>
+
+            <div className="grid gap-3">
+              {form.recurringBlackouts.map((blackout, index) => (
+                <div key={index} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_44px]">
+                  <label className="sr-only" htmlFor={`recurring-blackout-day-${index}`}>Unavailable day {index + 1}</label>
+                  <select
+                    id={`recurring-blackout-day-${index}`}
+                    value={blackout.dayOfWeek}
+                    onChange={(event) => updateRecurringBlackout(index, "dayOfWeek", event.target.value as RecurringBlackout["dayOfWeek"])}
+                    className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition focus:border-[#8a3829] focus:ring-2 focus:ring-[#8a3829]/20"
+                  >
+                    <option value="Any day">Any day</option>
+                    {weekdayOptions.map((day) => <option key={day} value={day}>{day}</option>)}
+                  </select>
+                  <label className="sr-only" htmlFor={`recurring-blackout-time-${index}`}>Unavailable time {index + 1}</label>
+                  <select
+                    id={`recurring-blackout-time-${index}`}
+                    value={blackout.timeOfDay}
+                    onChange={(event) => updateRecurringBlackout(index, "timeOfDay", event.target.value as RecurringBlackout["timeOfDay"])}
+                    className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition focus:border-[#8a3829] focus:ring-2 focus:ring-[#8a3829]/20"
+                  >
+                    <option value="All day">All day</option>
+                    {timeOfDayOptions.map((time) => <option key={time} value={time}>{time}</option>)}
+                  </select>
+                  <button type="button" onClick={() => removeRecurringBlackout(index)} aria-label={`Remove unavailable time ${index + 1}`} title="Remove unavailable time" className="flex h-11 w-11 items-center justify-center rounded-md border border-[#cad4cc] text-[#405047] transition hover:bg-[#f1f4ef] focus:outline-none focus:ring-2 focus:ring-[#9aa79f] focus:ring-offset-2">
+                    <Trash2 aria-hidden="true" size={17} />
+                  </button>
+                </div>
+              ))}
+              <button type="button" onClick={addRecurringBlackout} className="flex h-10 w-fit items-center gap-2 rounded-md border border-[#cad4cc] px-4 text-sm font-semibold text-[#8a3829] transition hover:bg-[#fff8f6] focus:outline-none focus:ring-2 focus:ring-[#9aa79f] focus:ring-offset-2">
+                <Plus aria-hidden="true" size={16} />
+                Add unavailable time
               </button>
             </div>
           </section>

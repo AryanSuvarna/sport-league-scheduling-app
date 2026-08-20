@@ -17,6 +17,7 @@ export type EditorAvailability = {
   available_end_date: string | null;
   available_dates: string[];
   blackout_dates: string[];
+  recurring_blackouts: Array<{ day_of_week: string; time_of_day: string }>;
   has_day_preference: boolean;
   preferred_days_of_week: string[];
   has_time_preference: boolean;
@@ -88,9 +89,16 @@ function rangesOverlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
   return aStart < bEnd && bStart < aEnd;
 }
 
-function teamCanPlay(availability: EditorAvailability | undefined, date: string) {
+function teamCanPlay(availability: EditorAvailability | undefined, date: string, startsAt: Date) {
   if (!availability) return false;
   if (availability.blackout_dates.includes(date)) return false;
+  const day = weekdays[startsAt.getDay()];
+  const hour = startsAt.getHours();
+  const timeOfDay = hour < 12 ? "Morning" : hour < 17 ? "Afternoon" : "Evening";
+  if (availability.recurring_blackouts.some((blackout) =>
+    (blackout.day_of_week === "Any day" || blackout.day_of_week === day) &&
+    (blackout.time_of_day === "All day" || blackout.time_of_day === timeOfDay),
+  )) return false;
   return (
     (availability.available_start_date !== null &&
       availability.available_end_date !== null &&
@@ -144,8 +152,8 @@ export function validateMatchAssignment(
 
   for (const [teamId, teamName] of [[match.home_team_id, match.home_team_name], [match.away_team_id, match.away_team_name]] as const) {
     const availability = context.availabilityByTeamId.get(teamId);
-    if (!teamCanPlay(availability, date)) {
-      issues.push(issue(match.id, "conflict", `team_unavailable:${teamId}`, `${teamName} unavailable`, `${teamName} is not available on this date.`));
+    if (!teamCanPlay(availability, date, startsAt)) {
+      issues.push(issue(match.id, "conflict", `team_unavailable:${teamId}`, `${teamName} unavailable`, `${teamName} is unavailable at this date and time.`));
     } else if (!teamPrefers(availability, startsAt)) {
       issues.push(issue(match.id, "warning", `preference:${teamId}`, `${teamName} preference`, `${teamName}'s preferred day or time is not met.`));
     }

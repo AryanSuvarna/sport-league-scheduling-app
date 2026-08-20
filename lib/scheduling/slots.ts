@@ -23,6 +23,7 @@ export type TeamAvailabilityForSlot = {
   available_end_date: string | null;
   available_dates: string[];
   blackout_dates: string[];
+  recurring_blackouts: Array<{ day_of_week: string; time_of_day: string }>;
   has_day_preference: boolean;
   preferred_days_of_week: string[];
   has_time_preference: boolean;
@@ -77,8 +78,23 @@ export function buildVenueSlots(
   });
 }
 
-function teamCanPlayOnDate(availability: TeamAvailabilityForSlot, date: string) {
+function timeOfDayFor(startsAt: Date) {
+  const hour = startsAt.getHours();
+  return hour < 12 ? "Morning" : hour < 17 ? "Afternoon" : "Evening";
+}
+
+function teamHasRecurringBlackout(availability: TeamAvailabilityForSlot, startsAt: Date) {
+  const day = weekdayNames[startsAt.getDay()];
+  const timeOfDay = timeOfDayFor(startsAt);
+  return availability.recurring_blackouts.some((blackout) =>
+    (blackout.day_of_week === "Any day" || blackout.day_of_week === day) &&
+    (blackout.time_of_day === "All day" || blackout.time_of_day === timeOfDay),
+  );
+}
+
+function teamCanPlaySlot(availability: TeamAvailabilityForSlot, startsAt: Date, date: string) {
   if (availability.blackout_dates.includes(date)) return false;
+  if (teamHasRecurringBlackout(availability, startsAt)) return false;
   const insideRange = availability.available_start_date !== null &&
     availability.available_end_date !== null &&
     date >= availability.available_start_date &&
@@ -87,9 +103,8 @@ function teamCanPlayOnDate(availability: TeamAvailabilityForSlot, date: string) 
 }
 
 function teamPrefersSlot(availability: TeamAvailabilityForSlot, startsAt: Date, date: string) {
-  const hour = startsAt.getHours();
-  const timeOfDay = hour < 12 ? "Morning" : hour < 17 ? "Afternoon" : "Evening";
-  return teamCanPlayOnDate(availability, date) &&
+  const timeOfDay = timeOfDayFor(startsAt);
+  return teamCanPlaySlot(availability, startsAt, date) &&
     (!availability.has_day_preference || availability.preferred_days_of_week.includes(weekdayNames[startsAt.getDay()])) &&
     (!availability.has_time_preference || availability.preferred_times_of_day.includes(timeOfDay));
 }
@@ -105,7 +120,7 @@ export function buildSolverSlots(
     return {
       ...slot,
       allowed_team_ids: [...availabilityByTeamId.entries()]
-        .filter(([, availability]) => teamCanPlayOnDate(availability, slot.date))
+        .filter(([, availability]) => teamCanPlaySlot(availability, startsAt, slot.date))
         .map(([teamId]) => teamId),
       preferred_team_ids: [...availabilityByTeamId.entries()]
         .filter(([, availability]) => teamPrefersSlot(availability, startsAt, slot.date))
