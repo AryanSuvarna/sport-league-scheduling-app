@@ -18,7 +18,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={cn("h-full antialiased", "font-sans", geist.variable)}>
-      <body className="min-h-full flex flex-col">{children}<AppToaster /></body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <footer className="border-t border-[#d6ded5] bg-[#f6f7f4] px-4 py-4 text-center text-sm text-[#637066]">
+          Powered by AI
+        </footer>
+        <AppToaster />
+      </body>
     </html>
   );
 }

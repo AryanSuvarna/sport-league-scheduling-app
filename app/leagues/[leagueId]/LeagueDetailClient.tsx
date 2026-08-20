@@ -39,6 +39,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [message, setMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleteConfirmationOpen, setIsDeleteConfirmationOpen] = useState(false);
   const [sendingInviteTeamId, setSendingInviteTeamId] = useState<string | null>(null);
   const [removedTeamIds, setRemovedTeamIds] = useState<string[]>([]);
   const [editableLeague, setEditableLeague] = useState({
@@ -359,7 +360,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
               </button>
               <button
                 type="button"
-                onClick={deleteLeague}
+                onClick={() => setIsDeleteConfirmationOpen(true)}
                 disabled={isSaving}
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-[#e1c3bd] bg-white px-5 text-sm font-semibold text-[#9a3d31] transition hover:border-[#c99388] focus:outline-none focus:ring-2 focus:ring-[#9a3d31] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -605,6 +606,18 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
           </aside>
         </section>
       </div>
+      {isDeleteConfirmationOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#18211c]/45 px-4" role="dialog" aria-modal="true" aria-labelledby="delete-league-title">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <h2 id="delete-league-title" className="text-xl font-semibold text-[#18211c]">Delete league?</h2>
+            <p className="mt-2 text-sm leading-6 text-[#637066]">Are you sure you want to delete <span className="font-semibold text-[#18211c]">{league.name}</span>? This permanently removes the league, its teams, availability, and schedules.</p>
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => setIsDeleteConfirmationOpen(false)} disabled={isSaving} className="h-11 rounded-md border border-[#c7d3ca] bg-white px-4 text-sm font-semibold text-[#1f5b47] disabled:opacity-50">Cancel</button>
+              <button type="button" onClick={() => void deleteLeague()} disabled={isSaving} className="h-11 rounded-md bg-[#9a3d31] px-4 text-sm font-semibold text-white hover:bg-[#7f3027] disabled:opacity-50">{isSaving ? "Deleting..." : "Delete league"}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
