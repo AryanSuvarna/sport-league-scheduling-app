@@ -1,11 +1,7 @@
 import Link from "next/link";
-import { ArrowLeft, Send } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
-type PageHeaderProps = {
-  onFinalSubmit: () => void;
-};
-
-export function PageHeader({ onFinalSubmit }: PageHeaderProps) {
+export function PageHeader() {
   return (
     <header className="flex flex-col gap-5 border-b border-[#d6ded5] pb-6 lg:flex-row lg:items-end lg:justify-between">
       <div className="space-y-3">
@@ -33,14 +29,6 @@ export function PageHeader({ onFinalSubmit }: PageHeaderProps) {
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           Leagues
         </Link>
-        <button
-          type="button"
-          onClick={onFinalSubmit}
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#1f5b47] px-5 text-sm font-semibold text-white transition hover:bg-[#164333] focus:outline-none focus:ring-2 focus:ring-[#1f5b47] focus:ring-offset-2"
-        >
-          Final submit
-          <Send className="h-4 w-4" aria-hidden="true" />
-        </button>
       </div>
     </header>
   );

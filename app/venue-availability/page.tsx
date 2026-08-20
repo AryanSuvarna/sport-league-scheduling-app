@@ -13,7 +13,7 @@ export default function VenueAvailabilityPage() {
   return (
     <main className="min-h-screen bg-[#f6f7f4] text-[#1b241f]">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 py-6 sm:px-6 lg:px-8">
-        <PageHeader onFinalSubmit={venueAvailability.finalSubmit} />
+        <PageHeader />
 
         <section className="grid min-h-0 items-stretch gap-6 lg:grid-cols-[minmax(360px,460px)_1fr]">
           <AvailabilityFormCard

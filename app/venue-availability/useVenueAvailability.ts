@@ -733,10 +733,6 @@ export function useVenueAvailability() {
     await loadAvailabilities();
   }
 
-  function finalSubmit() {
-    setMessage(`${availabilities.length} availabilities ready for scheduling.`);
-  }
-
   return {
     availabilityPanelStyle,
     form,
@@ -765,7 +761,6 @@ export function useVenueAvailability() {
     closeVenueModal,
     deleteAvailability,
     editAvailability,
-    finalSubmit,
     handleSubmit,
     openAddVenueModal,
     openEditVenueModal,
