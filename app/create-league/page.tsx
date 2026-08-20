@@ -15,6 +15,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { SchedulerRuleBuilder } from "@/components/SchedulerRuleBuilder";
 import { parseSchedulerRules, withWeeklyMatchLimit, type SchedulerRule } from "@/lib/scheduling/rules";
+import { toast } from "react-hot-toast";
 
 type LeagueForm = {
   leagueName: string;
@@ -63,7 +64,6 @@ export default function CreateLeaguePage() {
   const router = useRouter();
   const [form, setForm] = useState<LeagueForm>(initialForm);
   const [teams, setTeams] = useState<TeamForm[]>(initialTeams);
-  const [message, setMessage] = useState("");
   const [isCreated, setIsCreated] = useState(false);
   const [createdLeagueId, setCreatedLeagueId] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -81,7 +81,6 @@ export default function CreateLeaguePage() {
   function updateField(event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) {
     const { name, value } = event.target;
 
-    setMessage("");
     setIsCreated(false);
     setCreatedLeagueId("");
     setForm((currentForm) => ({
@@ -95,7 +94,6 @@ export default function CreateLeaguePage() {
     field: keyof Omit<TeamForm, "id">,
     value: string,
   ) {
-    setMessage("");
     setIsCreated(false);
     setCreatedLeagueId("");
     setTeams((currentTeams) =>
@@ -111,7 +109,6 @@ export default function CreateLeaguePage() {
   }
 
   function addTeam() {
-    setMessage("");
     setIsCreated(false);
     setCreatedLeagueId("");
     setTeams((currentTeams) => [
@@ -127,7 +124,6 @@ export default function CreateLeaguePage() {
   }
 
   function removeTeam(teamId: number) {
-    setMessage("");
     setIsCreated(false);
     setCreatedLeagueId("");
     setTeams((currentTeams) => {
@@ -143,32 +139,32 @@ export default function CreateLeaguePage() {
     event.preventDefault();
 
     if (!form.leagueName.trim()) {
-      setMessage("League name is required.");
+      toast.error("League name is required.");
       return;
     }
 
     if (!form.seasonStartDate || !form.seasonEndDate) {
-      setMessage("Choose a season start and end date.");
+      toast.error("Choose a season start and end date.");
       return;
     }
 
     if (form.seasonEndDate < form.seasonStartDate) {
-      setMessage("Season end date must be on or after the start date.");
+      toast.error("Season end date must be on or after the start date.");
       return;
     }
 
     if (Number(form.matchDurationMinutes) <= 0) {
-      setMessage("Match duration must be greater than 0.");
+      toast.error("Match duration must be greater than 0.");
       return;
     }
 
     if (!parseSchedulerRules(form.schedulerRules)) {
-      setMessage("Complete or remove every scheduler rule before creating the league.");
+      toast.error("Complete or remove every scheduler rule before creating the league.");
       return;
     }
 
     if (completeTeams.length < 2) {
-      setMessage("Add at least two complete teams.");
+      toast.error("Add at least two complete teams.");
       return;
     }
 
@@ -186,7 +182,7 @@ export default function CreateLeaguePage() {
     });
 
     if (hasIncompleteTeam) {
-      setMessage("Each started team needs a team name, captain name, and captain phone.");
+      toast.error("Each started team needs a team name, captain name, and captain phone.");
       return;
     }
 
@@ -195,12 +191,11 @@ export default function CreateLeaguePage() {
     );
 
     if (hasInvalidEmail) {
-      setMessage("Optional captain emails need to be valid email addresses.");
+      toast.error("Optional captain emails need to be valid email addresses.");
       return;
     }
 
     setIsSaving(true);
-    setMessage("Creating league...");
 
     const supabase = createClient();
     const { data: league, error: leagueError } = await supabase
@@ -218,7 +213,7 @@ export default function CreateLeaguePage() {
 
     if (leagueError || !league) {
       setIsSaving(false);
-      setMessage(leagueError?.message || "Could not create the league.");
+      toast.error(leagueError?.message || "Could not create the league.");
       return;
     }
 
@@ -235,14 +230,14 @@ export default function CreateLeaguePage() {
     if (teamsError) {
       await supabase.from("leagues").delete().eq("id", league.id);
       setIsSaving(false);
-      setMessage(teamsError.message);
+      toast.error(teamsError.message);
       return;
     }
 
     setIsSaving(false);
     setIsCreated(true);
     setCreatedLeagueId(league.id);
-    setMessage("League created. Venue availability can be added later from the league page.");
+    toast.success("League created. Venue availability can be added later from the league page.");
     router.refresh();
   }
 
@@ -444,7 +439,6 @@ export default function CreateLeaguePage() {
               <SchedulerRuleBuilder
                 rules={form.schedulerRules}
                 onChange={(schedulerRules) => {
-                  setMessage("");
                   setForm((currentForm) => ({ ...currentForm, schedulerRules }));
                 }}
               />
@@ -452,7 +446,6 @@ export default function CreateLeaguePage() {
 
             <div className="mt-5 flex flex-col gap-3 border-t border-[#e3e8e2] pt-5 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-h-5 text-sm text-[#637066]">
-                <p>{message}</p>
                 {isCreated ? (
                   <Link
                     href={createdLeagueId ? `/leagues/${createdLeagueId}` : "/leagues"}

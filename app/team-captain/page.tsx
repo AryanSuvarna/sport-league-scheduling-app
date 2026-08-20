@@ -17,6 +17,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { toast } from "react-hot-toast";
 
 type Weekday =
   | "Sunday"
@@ -127,8 +128,6 @@ function getInviteLockServerSnapshot() {
 export default function TeamCaptainPage() {
   const supabase = useMemo(() => createClient(), []);
   const [form, setForm] = useState<TeamCaptainForm>(getInitialForm);
-  const [message, setMessage] = useState("");
-  const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [isSaving, setIsSaving] = useState(false);
   const [leagues, setLeagues] = useState<League[]>([]);
   const [isLoadingLeagues, setIsLoadingLeagues] = useState(true);
@@ -159,8 +158,7 @@ export default function TeamCaptainPage() {
         .order("name", { ascending: true });
 
       if (error) {
-        setMessageTone("error");
-        setMessage(`Could not load leagues: ${error.message}`);
+        toast.error(`Could not load leagues: ${error.message}`);
       } else {
         setLeagues((data ?? []) as League[]);
       }
@@ -172,7 +170,6 @@ export default function TeamCaptainPage() {
   }, [supabase]);
 
   function updateField(field: keyof TeamCaptainForm, value: string) {
-    setMessage("");
     setForm((currentForm) => ({
       ...currentForm,
       [field]: value,
@@ -184,7 +181,6 @@ export default function TeamCaptainPage() {
     index: number,
     value: string,
   ) {
-    setMessage("");
     setForm((currentForm) => ({
       ...currentForm,
       [field]: currentForm[field].map((date, dateIndex) =>
@@ -212,7 +208,6 @@ export default function TeamCaptainPage() {
   }
 
   function setAnyDayPreference() {
-    setMessage("");
     setForm((currentForm) => ({
       ...currentForm,
       hasDayPreference: false,
@@ -221,7 +216,6 @@ export default function TeamCaptainPage() {
   }
 
   function togglePreferredDay(day: Weekday) {
-    setMessage("");
     setForm((currentForm) => {
       const isSelected = currentForm.preferredDaysOfWeek.includes(day);
       const nextDays = isSelected
@@ -237,7 +231,6 @@ export default function TeamCaptainPage() {
   }
 
   function setAnyTimePreference() {
-    setMessage("");
     setForm((currentForm) => ({
       ...currentForm,
       hasTimePreference: false,
@@ -246,7 +239,6 @@ export default function TeamCaptainPage() {
   }
 
   function toggleTimeOfDay(option: TimeOfDay) {
-    setMessage("");
     setForm((currentForm) => {
       const isSelected = currentForm.preferredTimesOfDay.includes(option);
       const nextTimes = isSelected
@@ -324,8 +316,7 @@ export default function TeamCaptainPage() {
     const validationError = validateForm();
 
     if (validationError) {
-      setMessageTone("error");
-      setMessage(validationError);
+      toast.error(validationError);
       return;
     }
 
@@ -345,8 +336,7 @@ export default function TeamCaptainPage() {
     });
 
     if (error) {
-      setMessageTone("error");
-      setMessage(`Could not submit availability: ${error.message}`);
+      toast.error(`Could not submit availability: ${error.message}`);
       setIsSaving(false);
       return;
     }
@@ -356,8 +346,7 @@ export default function TeamCaptainPage() {
         ? { ...initialForm, leagueId: currentForm.leagueId, teamId: currentForm.teamId }
         : initialForm,
     );
-    setMessageTone("success");
-    setMessage("Availability submitted.");
+    toast.success("Availability submitted.");
     setIsSaving(false);
   }
 
@@ -677,8 +666,6 @@ export default function TeamCaptainPage() {
                     ? { ...initialForm, leagueId: currentForm.leagueId, teamId: currentForm.teamId }
                     : initialForm,
                 );
-                setMessage("");
-                setMessageTone("success");
               }}
               className="h-11 rounded-md border border-[#cad4cc] px-5 text-sm font-semibold text-[#405047] transition hover:bg-[#f1f4ef] focus:outline-none focus:ring-2 focus:ring-[#9aa79f] focus:ring-offset-2"
             >
@@ -686,17 +673,6 @@ export default function TeamCaptainPage() {
             </button>
           </div>
 
-          {message ? (
-            <p
-              className={`rounded-md px-3 py-2 text-sm font-medium ${
-                messageTone === "error"
-                  ? "bg-[#fff1ee] text-[#8a3829]"
-                  : "bg-[#edf4ea] text-[#2c5c40]"
-              }`}
-            >
-              {message}
-            </p>
-          ) : null}
         </form>
       </div>
     </main>

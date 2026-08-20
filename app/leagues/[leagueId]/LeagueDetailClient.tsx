@@ -19,6 +19,7 @@ import { formatSeason, type League, type LeagueTeam } from "@/lib/leagues";
 import { SchedulerRuleBuilder } from "@/components/SchedulerRuleBuilder";
 import { parseSchedulerRules, ruleSummary, withWeeklyMatchLimit } from "@/lib/scheduling/rules";
 import { createClient } from "@/lib/supabase/client";
+import { toast } from "react-hot-toast";
 
 type LeagueDetailClientProps = {
   league: League;
@@ -37,7 +38,6 @@ type EditableTeam = {
 export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
   const router = useRouter();
   const [isEditing, setIsEditing] = useState(false);
-  const [message, setMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleteConfirmationOpen, setIsDeleteConfirmationOpen] = useState(false);
   const [sendingInviteTeamId, setSendingInviteTeamId] = useState<string | null>(null);
@@ -62,7 +62,6 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
   function updateField(event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) {
     const { name, value } = event.target;
 
-    setMessage("");
     setEditableLeague((currentLeague) => ({
       ...currentLeague,
       [name]: value,
@@ -70,7 +69,6 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
   }
 
   function updateTeam(teamId: string, field: keyof Omit<EditableTeam, "id" | "isNew">, value: string) {
-    setMessage("");
     setEditableTeams((currentTeams) =>
       currentTeams.map((team) =>
         team.id === teamId
@@ -84,7 +82,6 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
   }
 
   function addTeam() {
-    setMessage("");
     setEditableTeams((currentTeams) => [
       ...currentTeams,
       {
@@ -100,7 +97,6 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
   }
 
   function removeTeam(teamId: string) {
-    setMessage("");
     setEditableTeams((currentTeams) => {
       const teamToRemove = currentTeams.find((team) => team.id === teamId);
 
@@ -118,27 +114,27 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
 
   async function saveLeague() {
     if (!editableLeague.name.trim()) {
-      setMessage("League name is required.");
+      toast.error("League name is required.");
       return;
     }
 
     if (!editableLeague.seasonStartDate || !editableLeague.seasonEndDate) {
-      setMessage("Choose a season start and end date.");
+      toast.error("Choose a season start and end date.");
       return;
     }
 
     if (editableLeague.seasonEndDate < editableLeague.seasonStartDate) {
-      setMessage("Season end date must be on or after the start date.");
+      toast.error("Season end date must be on or after the start date.");
       return;
     }
 
     if (Number(editableLeague.matchDurationMinutes) <= 0) {
-      setMessage("Match duration must be greater than 0.");
+      toast.error("Match duration must be greater than 0.");
       return;
     }
 
     if (!parseSchedulerRules(editableLeague.schedulerRules)) {
-      setMessage("Complete or remove every scheduler rule before saving.");
+      toast.error("Complete or remove every scheduler rule before saving.");
       return;
     }
 
@@ -147,7 +143,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
     );
 
     if (completeTeams.length < 2) {
-      setMessage("Add at least two complete teams.");
+      toast.error("Add at least two complete teams.");
       return;
     }
 
@@ -165,7 +161,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
     });
 
     if (hasIncompleteTeam) {
-      setMessage("Each started team needs a team name, captain name, and captain phone.");
+      toast.error("Each started team needs a team name, captain name, and captain phone.");
       return;
     }
 
@@ -174,7 +170,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
     );
 
     if (hasInvalidEmail) {
-      setMessage("Optional captain emails need to be valid email addresses.");
+      toast.error("Optional captain emails need to be valid email addresses.");
       return;
     }
 
@@ -195,7 +191,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
 
     if (leagueError) {
       setIsSaving(false);
-      setMessage(leagueError.message);
+      toast.error(leagueError.message);
       return;
     }
 
@@ -217,7 +213,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
 
     if (teamUpdateError) {
       setIsSaving(false);
-      setMessage(teamUpdateError.message);
+      toast.error(teamUpdateError.message);
       return;
     }
 
@@ -236,7 +232,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
 
       if (insertTeamsError) {
         setIsSaving(false);
-        setMessage(insertTeamsError.message);
+        toast.error(insertTeamsError.message);
         return;
       }
     }
@@ -249,7 +245,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
 
       if (deleteTeamsError) {
         setIsSaving(false);
-        setMessage(deleteTeamsError.message);
+        toast.error(deleteTeamsError.message);
         return;
       }
     }
@@ -263,7 +259,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
       })),
     );
     setIsEditing(false);
-    setMessage("League updated.");
+    toast.success("League updated.");
     router.refresh();
   }
 
@@ -276,7 +272,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
     setIsSaving(false);
 
     if (error) {
-      setMessage(error.message);
+      toast.error(error.message);
       return;
     }
 
@@ -286,7 +282,6 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
 
   async function sendWhatsAppInvite(team: EditableTeam) {
     if (team.hasSubmittedAvailability) return;
-    setMessage("");
     setSendingInviteTeamId(team.id);
 
     try {
@@ -307,13 +302,13 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
       const result = await response.json().catch(() => null);
 
       if (!response.ok) {
-        setMessage(result?.error || "Could not send WhatsApp invite.");
+        toast.error(result?.error || "Could not send WhatsApp invite.");
         return;
       }
 
-      setMessage(`WhatsApp invite sent to ${team.captainName}.`);
+      toast.success(`WhatsApp invite sent to ${team.captainName}.`);
     } catch {
-      setMessage("Could not reach the WhatsApp invite endpoint.");
+      toast.error("Could not reach the WhatsApp invite endpoint.");
     } finally {
       setSendingInviteTeamId(null);
     }
@@ -369,7 +364,6 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
               </button>
             </div>
           </div>
-          {message ? <p className="mt-4 text-sm text-[#637066]">{message}</p> : null}
         </header>
 
         <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -442,7 +436,6 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
                   <SchedulerRuleBuilder
                     rules={editableLeague.schedulerRules}
                     onChange={(schedulerRules) => {
-                      setMessage("");
                       setEditableLeague((currentLeague) => ({ ...currentLeague, schedulerRules }));
                     }}
                   />

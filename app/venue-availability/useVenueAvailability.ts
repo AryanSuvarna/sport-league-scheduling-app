@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { toast } from "react-hot-toast";
 import type {
   Availability,
   AvailabilityForm,
@@ -82,7 +83,6 @@ export function useVenueAvailability() {
   const [isFieldModalOpen, setIsFieldModalOpen] = useState(false);
   const [isAddingVenue, setIsAddingVenue] = useState(false);
   const [isAddingField, setIsAddingField] = useState(false);
-  const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
@@ -235,7 +235,7 @@ export function useVenueAvailability() {
       .order("permit_start_time", { ascending: true });
 
     if (error) {
-      setMessage(`Could not load availabilities: ${error.message}`);
+      toast.error(`Could not load availabilities: ${error.message}`);
       setAvailabilities([]);
     } else {
       const rows = (data ?? []) as unknown as VenueAvailabilityRow[];
@@ -252,7 +252,7 @@ export function useVenueAvailability() {
       .order("name", { ascending: true });
 
     if (error) {
-      setMessage(`Could not load leagues: ${error.message}`);
+      toast.error(`Could not load leagues: ${error.message}`);
       return;
     }
 
@@ -269,14 +269,14 @@ export function useVenueAvailability() {
     ]);
 
     if (venuesResult.error) {
-      setMessage(`Could not load venues: ${venuesResult.error.message}`);
+      toast.error(`Could not load venues: ${venuesResult.error.message}`);
     } else {
       const rows = (venuesResult.data ?? []) as unknown as VenueRow[];
       setVenues(rows.map(mapVenueRow));
     }
 
     if (fieldsResult.error) {
-      setMessage(`Could not load fields: ${fieldsResult.error.message}`);
+      toast.error(`Could not load fields: ${fieldsResult.error.message}`);
     } else {
       const rows = (fieldsResult.data ?? []) as unknown as FieldRow[];
       setFields(
@@ -296,7 +296,6 @@ export function useVenueAvailability() {
   }, [loadAvailabilities, loadLeagues, loadVenueReferences]);
 
   function updateField(field: keyof AvailabilityForm, value: string) {
-    setMessage("");
     setForm((currentForm) => ({
       ...currentForm,
       [field]: value,
@@ -304,7 +303,6 @@ export function useVenueAvailability() {
   }
 
   function selectVenue(venue: Venue) {
-    setMessage("");
     setNewVenueForm(createEmptyVenueForm());
     setForm((currentForm) => ({
       ...currentForm,
@@ -355,7 +353,7 @@ export function useVenueAvailability() {
     const groundType = newVenueForm.groundType.trim();
 
     if (!name) {
-      setMessage("Venue name is required.");
+      toast.error("Venue name is required.");
       return;
     }
 
@@ -368,7 +366,7 @@ export function useVenueAvailability() {
       .single();
 
     if (venueError) {
-      setMessage(`Could not add venue: ${venueError.message}`);
+      toast.error(`Could not add venue: ${venueError.message}`);
       setIsAddingVenue(false);
       return;
     }
@@ -380,7 +378,7 @@ export function useVenueAvailability() {
       .eq("venue_id", venue.id);
 
     if (existingFieldsError) {
-      setMessage(`Venue added, but fields could not be loaded: ${existingFieldsError.message}`);
+      toast.error(`Venue added, but fields could not be loaded: ${existingFieldsError.message}`);
       setIsAddingVenue(false);
       return;
     }
@@ -395,7 +393,7 @@ export function useVenueAvailability() {
         .single();
 
       if (fieldError) {
-        setMessage(`Venue added, but default field could not be created: ${fieldError.message}`);
+        toast.error(`Venue added, but default field could not be created: ${fieldError.message}`);
         setIsAddingVenue(false);
         return;
       }
@@ -413,7 +411,7 @@ export function useVenueAvailability() {
     }));
     setNewVenueForm(createEmptyVenueForm());
     setIsVenueModalOpen(false);
-    setMessage("Venue added.");
+    toast.success("Venue added.");
     setIsAddingVenue(false);
   }
 
@@ -423,7 +421,7 @@ export function useVenueAvailability() {
     const groundType = newVenueForm.groundType.trim();
 
     if (!editingVenueId || !name) {
-      setMessage("Venue name is required.");
+      toast.error("Venue name is required.");
       return;
     }
 
@@ -442,7 +440,7 @@ export function useVenueAvailability() {
       .single();
 
     if (error) {
-      setMessage(`Could not update venue: ${error.message}`);
+      toast.error(`Could not update venue: ${error.message}`);
       setIsAddingVenue(false);
       return;
     }
@@ -459,7 +457,7 @@ export function useVenueAvailability() {
         : currentForm,
     );
     closeVenueModal();
-    setMessage("Venue updated.");
+    toast.success("Venue updated.");
     setIsAddingVenue(false);
   }
 
@@ -467,7 +465,7 @@ export function useVenueAvailability() {
     const label = newFieldLabel.trim();
 
     if (!form.selectedVenueId || !label) {
-      setMessage("Choose a venue and enter a field label.");
+      toast.error("Choose a venue and enter a field label.");
       return;
     }
 
@@ -480,7 +478,7 @@ export function useVenueAvailability() {
       .single();
 
     if (error) {
-      setMessage(`Could not add field: ${error.message}`);
+      toast.error(`Could not add field: ${error.message}`);
       setIsAddingField(false);
       return;
     }
@@ -494,7 +492,7 @@ export function useVenueAvailability() {
     }));
     setNewFieldLabel("");
     setIsFieldModalOpen(false);
-    setMessage("Field added.");
+    toast.success("Field added.");
     setIsAddingField(false);
   }
 
@@ -606,7 +604,7 @@ export function useVenueAvailability() {
     const { error: validationError, occurrences } = validateAndBuildOccurrences();
 
     if (validationError) {
-      setMessage(validationError);
+      toast.error(validationError);
       return;
     }
 
@@ -614,7 +612,7 @@ export function useVenueAvailability() {
 
     if (overlappingOccurrences.length > 0) {
       const firstOverlap = overlappingOccurrences[0];
-      setMessage(
+      toast.error(
         `Overlap found for ${firstOverlap.venueName} on ${formatDate(
           firstOverlap.permitDate,
         )}. Adjust the date or time before saving.`,
@@ -647,9 +645,9 @@ export function useVenueAvailability() {
         .eq("id", editingId);
 
       if (error) {
-        setMessage(`Could not update availability: ${error.message}`);
+        toast.error(`Could not update availability: ${error.message}`);
       } else {
-        setMessage("Availability updated.");
+        toast.success("Availability updated.");
         resetForm();
         await loadAvailabilities();
       }
@@ -677,9 +675,9 @@ export function useVenueAvailability() {
     const { error } = await supabase.from("venue_availability").insert(rows);
 
     if (error) {
-      setMessage(`Could not add availability: ${error.message}`);
+      toast.error(`Could not add availability: ${error.message}`);
     } else {
-      setMessage(
+      toast.success(
         form.mode === "recurring"
           ? `${rows.length} recurring permit occurrences added.`
           : "Availability added.",
@@ -705,23 +703,20 @@ export function useVenueAvailability() {
     }));
     setEditingId(availability.id);
     setEditingSource(availability);
-    setMessage("");
   }
 
   function selectLeague(leagueId: string) {
-    setMessage("");
     setSelectedLeagueId(leagueId);
     resetForm();
     setIsLoading(true);
   }
 
   async function deleteAvailability(id: string) {
-    setMessage("");
 
     const { error } = await supabase.from("venue_availability").delete().eq("id", id);
 
     if (error) {
-      setMessage(`Could not delete availability: ${error.message}`);
+      toast.error(`Could not delete availability: ${error.message}`);
       return;
     }
 
@@ -729,7 +724,7 @@ export function useVenueAvailability() {
       resetForm();
     }
 
-    setMessage("Availability deleted.");
+    toast.success("Availability deleted.");
     await loadAvailabilities();
   }
 
@@ -745,7 +740,6 @@ export function useVenueAvailability() {
     isLoading,
     isSaving,
     isVenueModalOpen,
-    message,
     matchingVenues,
     leagues,
     newFieldLabel,

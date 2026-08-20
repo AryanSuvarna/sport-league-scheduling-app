@@ -9,7 +9,6 @@ type AvailabilityFormCardProps = {
   formRef: RefObject<HTMLFormElement | null>;
   isEditing: boolean;
   isSaving: boolean;
-  message: string;
   recurringSummary: string;
   leagues: LeagueOption[];
   selectedLeagueId: string;
@@ -34,7 +33,6 @@ export function AvailabilityFormCard({
   formRef,
   isEditing,
   isSaving,
-  message,
   recurringSummary,
   leagues,
   selectedLeagueId,
@@ -367,11 +365,6 @@ export function AvailabilityFormCard({
         </button>
       </div>
 
-      {message ? (
-        <p className="mt-4 rounded-md bg-[#edf4ea] px-3 py-2 text-sm font-medium text-[#2c5c40]">
-          {message}
-        </p>
-      ) : null}
     </form>
   );
 }

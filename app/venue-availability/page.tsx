@@ -21,7 +21,6 @@ export default function VenueAvailabilityPage() {
             formRef={venueAvailability.formRef}
             isEditing={venueAvailability.isEditing}
             isSaving={venueAvailability.isSaving}
-            message={venueAvailability.message}
             recurringSummary={venueAvailability.recurringSummary}
             leagues={venueAvailability.leagues}
             selectedLeagueId={venueAvailability.selectedLeagueId}
