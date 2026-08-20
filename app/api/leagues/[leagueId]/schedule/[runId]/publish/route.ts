@@ -32,7 +32,7 @@ export async function POST(_request: Request, context: RouteContext) {
     return NextResponse.json({ error: "This draft is not the active editable schedule." }, { status: 409 });
   }
   const hardIssues = editor.issues.filter((issue) => issue.severity === "conflict");
-  const unscheduled = editor.matches.filter((match) => !match.starts_at || !match.field_id);
+  const unscheduled = editor.matches.filter((match) => match.match_status !== "cancelled" && (!match.starts_at || !match.field_id));
   if (hardIssues.length || unscheduled.length) {
     return NextResponse.json({ error: "Resolve all conflicts and unscheduled fixtures before publishing.", conflicts: hardIssues.length, unscheduled: unscheduled.length }, { status: 409 });
   }
