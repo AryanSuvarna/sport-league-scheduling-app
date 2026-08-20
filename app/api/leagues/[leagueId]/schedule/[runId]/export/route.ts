@@ -7,6 +7,7 @@ type RouteContext = { params: Promise<{ leagueId: string; runId: string }> };
 type MatchRow = {
   home_team_id: string;
   away_team_id: string;
+  fixture_type: "regular" | "makeup";
   field_id: string | null;
   starts_at: string | null;
   ends_at: string | null;
@@ -42,7 +43,7 @@ export async function GET(_request: Request, context: RouteContext) {
 
   const { data: matches, error: matchesError } = await supabase
     .from("league_matches")
-    .select("home_team_id, away_team_id, field_id, starts_at, ends_at, match_status, is_locked")
+    .select("home_team_id, away_team_id, fixture_type, field_id, starts_at, ends_at, match_status, is_locked")
     .eq("schedule_run_id", run.id)
     .order("starts_at", { ascending: true })
     .returns<MatchRow[]>();
@@ -66,6 +67,7 @@ export async function GET(_request: Request, context: RouteContext) {
       "End time": localTime(match.ends_at),
       "Home team": teamNames.get(match.home_team_id) ?? "Unknown team",
       "Away team": teamNames.get(match.away_team_id) ?? "Unknown team",
+      "Fixture type": match.fixture_type === "makeup" ? "Make-up" : "Regular",
       Venue: field?.venues?.name ?? "",
       "Venue address": field?.venues?.address ?? "",
       Field: field?.label ?? "",
@@ -88,9 +90,9 @@ export async function GET(_request: Request, context: RouteContext) {
 
   const schedule = XLSX.utils.json_to_sheet(rows);
   schedule["!cols"] = [
-    { wch: 15 }, { wch: 13 }, { wch: 13 }, { wch: 26 }, { wch: 26 }, { wch: 28 }, { wch: 40 }, { wch: 18 }, { wch: 14 }, { wch: 10 },
+    { wch: 15 }, { wch: 13 }, { wch: 13 }, { wch: 26 }, { wch: 26 }, { wch: 14 }, { wch: 28 }, { wch: 40 }, { wch: 18 }, { wch: 14 }, { wch: 10 },
   ];
-  schedule["!autofilter"] = { ref: `A1:J${Math.max(rows.length + 1, 1)}` };
+  schedule["!autofilter"] = { ref: `A1:K${Math.max(rows.length + 1, 1)}` };
   XLSX.utils.book_append_sheet(workbook, schedule, "Matches");
 
   const file = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });

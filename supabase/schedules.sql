@@ -19,6 +19,9 @@ create table if not exists public.league_matches (
   away_team_id uuid not null references public.league_teams (id) on delete restrict,
   field_id uuid references public.fields (id) on delete restrict,
   venue_availability_id uuid references public.venue_availability (id) on delete set null,
+  parent_match_id uuid references public.league_matches (id) on delete set null,
+  fixture_type text not null default 'regular'
+    check (fixture_type in ('regular', 'makeup')),
   starts_at timestamp,
   ends_at timestamp,
   is_locked boolean not null default false,
@@ -64,6 +67,12 @@ alter table public.league_schedule_runs
 alter table public.league_matches
   add column if not exists is_locked boolean not null default false;
 
+alter table public.league_matches
+  add column if not exists parent_match_id uuid references public.league_matches (id) on delete set null;
+
+alter table public.league_matches
+  add column if not exists fixture_type text not null default 'regular';
+
 alter table public.league_schedule_edit_log
   add column if not exists is_undone boolean not null default false;
 
@@ -88,6 +97,13 @@ alter table public.league_matches
   add constraint league_matches_match_status_check
   check (match_status in ('scheduled', 'confirmed', 'played', 'cancelled'));
 
+alter table public.league_matches
+  drop constraint if exists league_matches_fixture_type_check;
+
+alter table public.league_matches
+  add constraint league_matches_fixture_type_check
+  check (fixture_type in ('regular', 'makeup'));
+
 create index if not exists league_schedule_runs_league_created_at_idx
 on public.league_schedule_runs (league_id, created_at desc);
 
@@ -103,6 +119,10 @@ on public.league_matches (schedule_run_id, home_team_id);
 
 create index if not exists league_matches_schedule_run_away_team_idx
 on public.league_matches (schedule_run_id, away_team_id);
+
+create index if not exists league_matches_parent_match_idx
+on public.league_matches (parent_match_id)
+where parent_match_id is not null;
 
 create index if not exists league_schedule_edit_log_run_created_at_idx
 on public.league_schedule_edit_log (schedule_run_id, created_at desc);

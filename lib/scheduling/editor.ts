@@ -35,6 +35,8 @@ export type EditorPermit = {
 
 export type EditorMatch = {
   id: string;
+  parent_match_id: string | null;
+  fixture_type: "regular" | "makeup";
   home_team_id: string;
   away_team_id: string;
   field_id: string | null;
@@ -160,7 +162,7 @@ export function validateMatchAssignment(
   }
 
   const occupiedFieldMatches = context.matches.filter((other) =>
-    other.id !== match.id && other.field_id === candidate.fieldId && other.starts_at && other.ends_at &&
+    other.id !== match.id && other.match_status !== "cancelled" && other.field_id === candidate.fieldId && other.starts_at && other.ends_at &&
     rangesOverlap(startsAt, endsAt, localDate(other.starts_at), localDate(other.ends_at)),
   );
   if (permit && occupiedFieldMatches.length >= permit.capacity) {
@@ -168,7 +170,7 @@ export function validateMatchAssignment(
   }
 
   const relatedMatches = context.matches.filter((other) =>
-    other.id !== match.id && other.starts_at && other.ends_at &&
+    other.id !== match.id && other.match_status !== "cancelled" && other.starts_at && other.ends_at &&
     (other.home_team_id === match.home_team_id || other.away_team_id === match.home_team_id || other.home_team_id === match.away_team_id || other.away_team_id === match.away_team_id),
   );
   const restMilliseconds = (context.minRestHours ?? 0) * 60 * 60 * 1000;
@@ -204,7 +206,9 @@ export function validateMatchAssignment(
 }
 
 export function getScheduleIssues(matches: EditorMatch[], context: ValidationContext) {
-  return matches.flatMap((match) => validateMatchAssignment(match, { startsAt: match.starts_at, fieldId: match.field_id }, context));
+  return matches
+    .filter((match) => match.match_status !== "cancelled")
+    .flatMap((match) => validateMatchAssignment(match, { startsAt: match.starts_at, fieldId: match.field_id }, context));
 }
 
 export function validSlotCount(match: EditorMatch, context: ValidationContext) {
@@ -217,18 +221,20 @@ export function validSlotCount(match: EditorMatch, context: ValidationContext) {
   }, 0);
 }
 
-export function getSuggestedSlots(match: EditorMatch, context: ValidationContext, limit = 6): SuggestedSlot[] {
+export function getSuggestedSlots(match: EditorMatch, context: ValidationContext): SuggestedSlot[] {
   const candidates: SuggestedSlot[] = [];
+  const now = new Date();
   for (const permit of context.permits) {
     const permitEnd = toDateTime(permit.permit_date, permit.permit_end_time);
     for (let startsAt = toDateTime(permit.permit_date, permit.permit_start_time); startsAt.getTime() + context.matchDurationMinutes * 60_000 <= permitEnd.getTime(); startsAt = new Date(startsAt.getTime() + context.matchDurationMinutes * 60_000)) {
+      if (startsAt <= now) continue;
       const candidateStart = formatLocalDateTime(startsAt);
       const validation = validateMatchAssignment(match, { startsAt: candidateStart, fieldId: permit.field_id }, context);
       if (validation.some((entry) => entry.severity === "conflict")) continue;
       candidates.push({ startsAt: candidateStart, endsAt: assignmentEnd(candidateStart, context.matchDurationMinutes), fieldId: permit.field_id, permitId: permit.id, warningCount: validation.length });
     }
   }
-  return candidates.toSorted((first, second) => first.warningCount - second.warningCount || first.startsAt.localeCompare(second.startsAt)).slice(0, limit);
+  return candidates.toSorted((first, second) => first.warningCount - second.warningCount || first.startsAt.localeCompare(second.startsAt));
 }
 
 export function assignmentEnd(startsAt: string, durationMinutes: number) {

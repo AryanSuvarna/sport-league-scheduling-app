@@ -39,7 +39,7 @@ export async function POST(_request: Request, context: RouteContext<"/api/league
       preferred_slot_ids: slots.filter((slot) => slot.preferred_team_ids.includes(team.id)).map((slot) => slot.id),
     })),
   };
-  const fixed_matches = editor.matches.filter((match) => match.is_locked).map((match) => {
+  const fixed_matches = editor.matches.filter((match) => match.is_locked && match.match_status !== "cancelled").map((match) => {
     const slot = slots.find((item) => item.field_id === match.field_id && item.starts_at.replace(/\.\d+Z?$/, "") === match.starts_at?.replace(/\.\d+Z?$/, ""));
     return slot ? { home_team_id: match.home_team_id, away_team_id: match.away_team_id, slot_id: slot.id } : null;
   });
