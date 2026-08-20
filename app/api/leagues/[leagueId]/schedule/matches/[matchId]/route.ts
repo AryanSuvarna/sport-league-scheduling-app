@@ -24,7 +24,7 @@ export async function PATCH(request: Request, context: RouteContext<"/api/league
   const { data: availabilityRows } = await supabase.from("team_availability_submissions").select("team_id, available_start_date, available_end_date, available_dates, blackout_dates, has_day_preference, preferred_days_of_week, has_time_preference, preferred_times_of_day, created_at").in("team_id", editor.league.teams.map((team) => team.id)).order("created_at", { ascending: false });
   const availabilityByTeamId = new Map();
   for (const row of availabilityRows ?? []) if (!availabilityByTeamId.has(row.team_id)) availabilityByTeamId.set(row.team_id, row);
-  const validationContext: ValidationContext = { matches: editor.matches, permits: editor.permits, availabilityByTeamId, matchDurationMinutes: editor.league.match_duration_minutes, maxMatchesPerTeamPerWeek: editor.league.max_matches_per_team_per_week, minRestHours: editor.run.input_snapshot?.settings?.min_rest_hours ?? 0 };
+  const validationContext: ValidationContext = { matches: editor.matches, permits: editor.permits, availabilityByTeamId, matchDurationMinutes: editor.league.match_duration_minutes, maxMatchesPerTeamPerWeek: editor.run.input_snapshot?.settings?.max_matches_per_team_per_week ?? editor.league.max_matches_per_team_per_week, minRestHours: editor.run.input_snapshot?.settings?.min_rest_hours ?? 0 };
   const validation = isAssignmentUpdate ? validateMatchAssignment(match, candidate, validationContext) : [];
   const hardIssues = validation.filter((item) => item.severity === "conflict");
   if (hardIssues.length) return NextResponse.json({ error: "This assignment has hard scheduling conflicts.", issues: hardIssues }, { status: 422 });

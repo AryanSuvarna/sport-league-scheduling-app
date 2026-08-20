@@ -14,7 +14,7 @@ export type League = {
   season_end_date: string;
   match_duration_minutes: number;
   max_matches_per_team_per_week: number;
-  match_rules: string[];
+  scheduler_rules: import("@/lib/scheduling/rules").SchedulerRule[];
   league_teams: LeagueTeam[];
 };
 

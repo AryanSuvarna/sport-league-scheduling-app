@@ -24,7 +24,9 @@ Run its tests with:
 {
   "teams": [{"id": "team-a", "name": "Team A", "allowed_slot_ids": ["slot-1"]}],
   "slots": [{"id": "slot-1", "field_id": "field-1", "starts_at": "2026-05-01T18:00:00Z", "ends_at": "2026-05-01T20:00:00Z"}],
-  "settings": {"games_per_pair": 1, "max_matches_per_team_per_week": 1, "max_matches_per_team_per_day": 1, "min_rest_hours": 24}
+  "settings": {"games_per_pair": 1, "max_matches_per_team_per_week": 1, "max_matches_per_team_per_day": 1, "min_rest_hours": 24},
+  "excluded_dates": ["2026-12-25"],
+  "soft_avoid_dates": ["2026-12-26"]
 }
 ```
 
@@ -32,6 +34,10 @@ Run its tests with:
 play in every submitted slot; an explicit empty list means the team cannot play
 in any submitted slot. `preferred_slot_ids` is optimized but never makes a
 schedule impossible.
+
+`excluded_dates` prevents all matches on those dates. `soft_avoid_dates` keeps
+those dates available, but assigns a strong penalty so they are only used when
+the remaining schedule cannot fit.
 
 The solver always uses one worker and a fixed random seed, so equal inputs produce equal output. A `status` of `infeasible` means the supplied hard constraints have no solution.
 

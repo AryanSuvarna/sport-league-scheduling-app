@@ -148,6 +148,40 @@ class SchedulerTests(TestCase):
 
         self.assertEqual(build_schedule(request).status, "infeasible")
 
+    def test_excludes_hard_avoided_dates(self):
+        request = ScheduleRequest.model_validate(
+            {
+                "teams": [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}],
+                "slots": [
+                    {"id": "holiday", "field_id": "f1", "starts_at": "2026-12-25T18:00:00Z", "ends_at": "2026-12-25T20:00:00Z"},
+                    {"id": "regular", "field_id": "f1", "starts_at": "2026-12-26T18:00:00Z", "ends_at": "2026-12-26T20:00:00Z"},
+                ],
+                "excluded_dates": ["2026-12-25"],
+            }
+        )
+
+        response = build_schedule(request)
+
+        self.assertEqual(response.status, "optimal")
+        self.assertEqual(response.matches[0].slot_id, "regular")
+
+    def test_soft_avoided_dates_are_only_used_when_needed(self):
+        request = ScheduleRequest.model_validate(
+            {
+                "teams": [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}],
+                "slots": [
+                    {"id": "holiday", "field_id": "f1", "starts_at": "2026-12-25T18:00:00Z", "ends_at": "2026-12-25T20:00:00Z"},
+                    {"id": "regular", "field_id": "f1", "starts_at": "2026-12-26T18:00:00Z", "ends_at": "2026-12-26T20:00:00Z"},
+                ],
+                "soft_avoid_dates": ["2026-12-25"],
+            }
+        )
+
+        response = build_schedule(request)
+
+        self.assertEqual(response.status, "optimal")
+        self.assertEqual(response.matches[0].slot_id, "regular")
+
     def test_preserves_fixed_match_when_optimizing_remaining_fixtures(self):
         request = ScheduleRequest.model_validate(
             {

@@ -23,7 +23,7 @@ export default async function LeaguePage({ params }: LeaguePageProps) {
         season_end_date,
         match_duration_minutes,
         max_matches_per_team_per_week,
-        match_rules,
+        scheduler_rules,
         league_teams (
           id,
           name,

@@ -13,7 +13,7 @@ export async function GET(_request: Request, context: RouteContext<"/api/leagues
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const availabilityByTeamId = new Map<string, EditorAvailability>();
   for (const row of (rows ?? []) as EditorAvailability[]) if (!availabilityByTeamId.has(row.team_id)) availabilityByTeamId.set(row.team_id, row);
-  const validationContext: ValidationContext = { matches: editor.matches, permits: editor.permits, availabilityByTeamId, matchDurationMinutes: editor.league.match_duration_minutes, maxMatchesPerTeamPerWeek: editor.league.max_matches_per_team_per_week, minRestHours: editor.run?.input_snapshot?.settings?.min_rest_hours ?? 0 };
+  const validationContext: ValidationContext = { matches: editor.matches, permits: editor.permits, availabilityByTeamId, matchDurationMinutes: editor.league.match_duration_minutes, maxMatchesPerTeamPerWeek: editor.run?.input_snapshot?.settings?.max_matches_per_team_per_week ?? editor.league.max_matches_per_team_per_week, minRestHours: editor.run?.input_snapshot?.settings?.min_rest_hours ?? 0 };
   const fields = new Map(editor.fields.map((field) => [field.id, field]));
   return NextResponse.json({ suggestions: getSuggestedSlots(match, validationContext).map((slot) => ({ ...slot, field: fields.get(slot.fieldId) ?? null })) });
 }

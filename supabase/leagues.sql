@@ -11,11 +11,34 @@ create table if not exists public.leagues (
   max_matches_per_team_per_week integer not null default 1
     check (max_matches_per_team_per_week > 0),
   match_rules text[] not null default '{}',
+  scheduler_rules jsonb not null default '[]'::jsonb
+    check (jsonb_typeof(scheduler_rules) = 'array'),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint leagues_season_range_check
     check (season_end_date >= season_start_date)
 );
+
+alter table public.leagues
+  add column if not exists scheduler_rules jsonb not null default '[]'::jsonb;
+
+alter table public.leagues
+  drop constraint if exists leagues_scheduler_rules_array;
+
+alter table public.leagues
+  add constraint leagues_scheduler_rules_array
+  check (jsonb_typeof(scheduler_rules) = 'array');
+
+-- Preserve every existing league's weekly match cap as its first typed rule.
+update public.leagues
+set scheduler_rules = jsonb_build_array(
+  jsonb_build_object(
+    'id', 'weekly-match-limit',
+    'type', 'max_matches_per_team_per_week',
+    'value', max_matches_per_team_per_week
+  )
+)
+where scheduler_rules = '[]'::jsonb;
 
 create table if not exists public.league_teams (
   id uuid primary key default gen_random_uuid(),

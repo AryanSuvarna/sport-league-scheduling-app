@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ChangeEvent, type FormEvent, useMemo, useState } from "react";
+import { type ChangeEvent, type FormEvent, useState } from "react";
 import {
   ArrowLeft,
   CalendarRange,
@@ -13,6 +13,8 @@ import {
   Users,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { SchedulerRuleBuilder } from "@/components/SchedulerRuleBuilder";
+import { parseSchedulerRules, withWeeklyMatchLimit, type SchedulerRule } from "@/lib/scheduling/rules";
 
 type LeagueForm = {
   leagueName: string;
@@ -20,8 +22,7 @@ type LeagueForm = {
   seasonStartDate: string;
   seasonEndDate: string;
   matchDurationMinutes: string;
-  maxMatchesPerTeamPerWeek: string;
-  matchRules: string;
+  schedulerRules: SchedulerRule[];
 };
 
 type TeamForm = {
@@ -38,8 +39,7 @@ const initialForm: LeagueForm = {
   seasonStartDate: "",
   seasonEndDate: "",
   matchDurationMinutes: "120",
-  maxMatchesPerTeamPerWeek: "1",
-  matchRules: "",
+  schedulerRules: withWeeklyMatchLimit([]),
 };
 
 const initialTeams: TeamForm[] = [
@@ -68,7 +68,6 @@ export default function CreateLeaguePage() {
   const [createdLeagueId, setCreatedLeagueId] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
-  const rules = useMemo(() => splitLines(form.matchRules), [form.matchRules]);
   const completeTeams = teams.filter(
     (team) =>
       team.teamName.trim() && team.captainName.trim() && team.captainPhone.trim(),
@@ -163,8 +162,8 @@ export default function CreateLeaguePage() {
       return;
     }
 
-    if (Number(form.maxMatchesPerTeamPerWeek) <= 0) {
-      setMessage("Max matches per team per week must be greater than 0.");
+    if (!parseSchedulerRules(form.schedulerRules)) {
+      setMessage("Complete or remove every scheduler rule before creating the league.");
       return;
     }
 
@@ -212,8 +211,7 @@ export default function CreateLeaguePage() {
         season_start_date: form.seasonStartDate,
         season_end_date: form.seasonEndDate,
         match_duration_minutes: Number(form.matchDurationMinutes),
-        max_matches_per_team_per_week: Number(form.maxMatchesPerTeamPerWeek),
-        match_rules: rules,
+        scheduler_rules: form.schedulerRules,
       })
       .select("id")
       .single();
@@ -345,16 +343,6 @@ export default function CreateLeaguePage() {
                 </div>
               </label>
 
-              <label className="block text-sm font-medium text-[#39433d]">
-                Max matches per team per week
-                <input
-                  name="maxMatchesPerTeamPerWeek"
-                  value={form.maxMatchesPerTeamPerWeek}
-                  onChange={updateField}
-                  inputMode="numeric"
-                  className="mt-2 h-11 w-full rounded-md border border-[#cfd8d0] bg-white px-3 text-sm text-[#18211c] outline-none transition focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/15"
-                />
-              </label>
             </div>
 
             <section className="mt-5 rounded-md border border-[#d6ded5] bg-[#fbfcfa] p-4">
@@ -453,17 +441,13 @@ export default function CreateLeaguePage() {
             </section>
 
             <div className="mt-5">
-              <label className="block text-sm font-medium text-[#39433d]">
-                Match rules
-                <textarea
-                  name="matchRules"
-                  value={form.matchRules}
-                  onChange={updateField}
-                  placeholder={"One rule per line\nNo team plays twice in a day\nBalance home and away games\nAvoid holiday weekends"}
-                  rows={10}
-                  className="mt-2 w-full resize-none rounded-md border border-[#cfd8d0] bg-white px-3 py-3 text-sm leading-6 text-[#18211c] outline-none transition placeholder:text-[#8a948d] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/15"
-                />
-              </label>
+              <SchedulerRuleBuilder
+                rules={form.schedulerRules}
+                onChange={(schedulerRules) => {
+                  setMessage("");
+                  setForm((currentForm) => ({ ...currentForm, schedulerRules }));
+                }}
+              />
             </div>
 
             <div className="mt-5 flex flex-col gap-3 border-t border-[#e3e8e2] pt-5 sm:flex-row sm:items-center sm:justify-between">
@@ -497,12 +481,7 @@ export default function CreateLeaguePage() {
               label="Match duration"
               value={`${form.matchDurationMinutes || 0} min`}
             />
-            <SummaryMetric
-              icon={CalendarRange}
-              label="Weekly max"
-              value={form.maxMatchesPerTeamPerWeek || 0}
-            />
-            <SummaryMetric icon={ListChecks} label="Rules" value={rules.length} />
+            <SummaryMetric icon={ListChecks} label="Rules" value={form.schedulerRules.length} />
             <div className="rounded-md border border-[#d6ded5] bg-white p-5 shadow-sm">
               <p className="text-sm font-semibold text-[#18211c]">
                 {isCreated
@@ -524,13 +503,6 @@ export default function CreateLeaguePage() {
       </div>
     </main>
   );
-}
-
-function splitLines(value: string) {
-  return value
-    .split("\n")
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function SummaryMetric({

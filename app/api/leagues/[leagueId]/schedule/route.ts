@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { buildSolverSlots } from "@/lib/scheduling/slots";
 import { createClient } from "@/lib/supabase/server";
+import { parseSchedulerRules } from "@/lib/scheduling/rules";
 
 type LeagueRow = {
   id: string;
@@ -8,6 +9,7 @@ type LeagueRow = {
   season_end_date: string;
   match_duration_minutes: number;
   max_matches_per_team_per_week: number;
+  scheduler_rules: unknown;
   league_teams: LeagueTeamRow[];
 };
 
@@ -84,7 +86,7 @@ export async function POST(
   const { data: league, error: leagueError } = await supabase
     .from("leagues")
     .select(
-      "id, season_start_date, season_end_date, match_duration_minutes, max_matches_per_team_per_week, league_teams(id, name)",
+      "id, season_start_date, season_end_date, match_duration_minutes, max_matches_per_team_per_week, scheduler_rules, league_teams(id, name)",
     )
     .eq("id", leagueId)
     .single()
@@ -93,6 +95,24 @@ export async function POST(
   if (leagueError || !league) {
     return NextResponse.json({ error: "League not found." }, { status: 404 });
   }
+
+  const schedulerRules = parseSchedulerRules(league.scheduler_rules);
+  if (!schedulerRules) {
+    return NextResponse.json({ error: "This league has invalid scheduler rules. Edit the league and save its rules again." }, { status: 422 });
+  }
+  const configuredRules = schedulerRules;
+
+  function numericRuleValue(type: "games_per_pair" | "max_matches_per_team_per_week" | "max_matches_per_team_per_day" | "min_rest_hours") {
+    const rule = configuredRules.find((item) => item.type === type);
+    return rule && "value" in rule ? rule.value : undefined;
+  }
+
+  const hardAvoidedDates = configuredRules
+    .filter((rule): rule is Extract<typeof rule, { type: "avoid_dates" }> => rule.type === "avoid_dates" && rule.strength === "hard")
+    .flatMap((rule) => rule.dates);
+  const softAvoidedDates = configuredRules
+    .filter((rule): rule is Extract<typeof rule, { type: "avoid_dates" }> => rule.type === "avoid_dates" && rule.strength === "soft")
+    .flatMap((rule) => rule.dates);
 
   const [teamAvailabilityResult, venueAvailabilityResult] = await Promise.all([
     supabase
@@ -182,11 +202,13 @@ export async function POST(
       capacity: slot.capacity,
     })),
     settings: {
-      games_per_pair: options.gamesPerPair ?? 1,
-      max_matches_per_team_per_week: league.max_matches_per_team_per_week,
-      max_matches_per_team_per_day: options.maxMatchesPerTeamPerDay ?? 1,
-      min_rest_hours: options.minRestHours ?? 0,
+      games_per_pair: numericRuleValue("games_per_pair") ?? options.gamesPerPair ?? 1,
+      max_matches_per_team_per_week: numericRuleValue("max_matches_per_team_per_week") ?? league.max_matches_per_team_per_week,
+      max_matches_per_team_per_day: numericRuleValue("max_matches_per_team_per_day") ?? options.maxMatchesPerTeamPerDay ?? 1,
+      min_rest_hours: numericRuleValue("min_rest_hours") ?? options.minRestHours ?? 0,
     },
+    excluded_dates: hardAvoidedDates,
+    soft_avoid_dates: softAvoidedDates,
   };
 
   let solverResponse: SolverResponse;

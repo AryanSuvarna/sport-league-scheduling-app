@@ -18,7 +18,7 @@ export type EditorRun = {
   objective_value: number | null;
   created_at: string;
   parent_schedule_run_id: string | null;
-  input_snapshot: { settings?: { min_rest_hours?: number } } | null;
+  input_snapshot: { settings?: { min_rest_hours?: number; max_matches_per_team_per_week?: number } } | null;
 };
 
 export type ScheduleEditorData = {
@@ -78,7 +78,7 @@ export async function loadScheduleEditorData(leagueId: string): Promise<Schedule
   });
   const latestAvailability = new Map<string, EditorAvailability>();
   for (const row of (availabilityResult.data ?? []) as EditorAvailability[]) if (!latestAvailability.has(row.team_id)) latestAvailability.set(row.team_id, row);
-  const context: ValidationContext = { matches, permits: (permitsResult.data ?? []) as EditorPermit[], availabilityByTeamId: latestAvailability, matchDurationMinutes: league.match_duration_minutes, maxMatchesPerTeamPerWeek: league.max_matches_per_team_per_week, minRestHours: run?.input_snapshot?.settings?.min_rest_hours ?? 0 };
+  const context: ValidationContext = { matches, permits: (permitsResult.data ?? []) as EditorPermit[], availabilityByTeamId: latestAvailability, matchDurationMinutes: league.match_duration_minutes, maxMatchesPerTeamPerWeek: run?.input_snapshot?.settings?.max_matches_per_team_per_week ?? league.max_matches_per_team_per_week, minRestHours: run?.input_snapshot?.settings?.min_rest_hours ?? 0 };
   const issues = getScheduleIssues(matches, context);
   const validSlotCounts = Object.fromEntries(matches.filter((match) => !match.starts_at || !match.field_id).map((match) => [match.id, validSlotCount(match, context)]));
   return { league: { ...league, teams: league.league_teams }, run: run ?? null, matches, fields, permits: (permitsResult.data ?? []) as EditorPermit[], issues, validSlotCounts };

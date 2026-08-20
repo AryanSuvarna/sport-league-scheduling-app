@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ChangeEvent, useMemo, useState } from "react";
+import { type ChangeEvent, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -16,6 +16,8 @@ import {
   Users,
 } from "lucide-react";
 import { formatSeason, type League, type LeagueTeam } from "@/lib/leagues";
+import { SchedulerRuleBuilder } from "@/components/SchedulerRuleBuilder";
+import { parseSchedulerRules, ruleSummary, withWeeklyMatchLimit } from "@/lib/scheduling/rules";
 import { createClient } from "@/lib/supabase/client";
 
 type LeagueDetailClientProps = {
@@ -44,21 +46,12 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
     seasonStartDate: league.season_start_date,
     seasonEndDate: league.season_end_date,
     matchDurationMinutes: String(league.match_duration_minutes),
-    maxMatchesPerTeamPerWeek: String(league.max_matches_per_team_per_week),
-    rules: league.match_rules.join("\n"),
+    schedulerRules: withWeeklyMatchLimit(league.scheduler_rules, league.max_matches_per_team_per_week),
   });
   const [editableTeams, setEditableTeams] = useState<EditableTeam[]>(
     league.league_teams.map(formatEditableTeam),
   );
 
-  const rules = useMemo(
-    () =>
-      editableLeague.rules
-        .split("\n")
-        .map((rule) => rule.trim())
-        .filter(Boolean),
-    [editableLeague.rules],
-  );
   const seasonLabel = formatSeason(
     editableLeague.seasonStartDate,
     editableLeague.seasonEndDate,
@@ -141,8 +134,8 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
       return;
     }
 
-    if (Number(editableLeague.maxMatchesPerTeamPerWeek) <= 0) {
-      setMessage("Max matches per team per week must be greater than 0.");
+    if (!parseSchedulerRules(editableLeague.schedulerRules)) {
+      setMessage("Complete or remove every scheduler rule before saving.");
       return;
     }
 
@@ -193,8 +186,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
         season_start_date: editableLeague.seasonStartDate,
         season_end_date: editableLeague.seasonEndDate,
         match_duration_minutes: Number(editableLeague.matchDurationMinutes),
-        max_matches_per_team_per_week: Number(editableLeague.maxMatchesPerTeamPerWeek),
-        match_rules: rules,
+        scheduler_rules: editableLeague.schedulerRules,
       })
       .eq("id", league.id);
 
@@ -440,22 +432,16 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
                     value={editableLeague.matchDurationMinutes}
                     onChange={updateField}
                   />
-                  <EditField
-                    label="Max matches per team per week"
-                    name="maxMatchesPerTeamPerWeek"
-                    value={editableLeague.maxMatchesPerTeamPerWeek}
-                    onChange={updateField}
+                </div>
+
+                <div className="mt-5">
+                  <SchedulerRuleBuilder
+                    rules={editableLeague.schedulerRules}
+                    onChange={(schedulerRules) => {
+                      setMessage("");
+                      setEditableLeague((currentLeague) => ({ ...currentLeague, schedulerRules }));
+                    }}
                   />
-                  <label className="block text-sm font-medium text-[#39433d] sm:col-span-2">
-                    Match rules
-                    <textarea
-                      name="rules"
-                      value={editableLeague.rules}
-                      onChange={updateField}
-                      rows={5}
-                      className="mt-2 w-full resize-none rounded-md border border-[#cfd8d0] bg-white px-3 py-3 text-sm leading-6 text-[#18211c] outline-none transition focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/15"
-                    />
-                  </label>
                 </div>
 
                 <section className="mt-5 rounded-md border border-[#d6ded5] bg-[#fbfcfa] p-4">
@@ -586,22 +572,20 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
                 </section>
 
                 <section className="rounded-md border border-[#d6ded5] bg-white p-5 shadow-sm">
-                  <h2 className="text-lg font-semibold text-[#18211c]">Match rules</h2>
-                  {rules.length > 0 ? (
+                  <h2 className="text-lg font-semibold text-[#18211c]">Scheduler rules</h2>
+                  {editableLeague.schedulerRules.length > 0 ? (
                     <ul className="mt-4 space-y-2">
-                      {rules.map((rule) => (
-                        <li
-                          key={rule}
-                          className="rounded-md border border-[#e1e7e0] bg-[#fbfcfa] px-3 py-2 text-sm text-[#39433d]"
-                        >
-                          {rule}
+                      {editableLeague.schedulerRules.map((rule) => (
+                        <li key={rule.id} className="rounded-md border border-[#e1e7e0] bg-[#fbfcfa] px-3 py-2 text-sm text-[#39433d]">
+                          {ruleSummary(rule)}
                         </li>
                       ))}
                     </ul>
                   ) : (
-                    <p className="mt-4 text-sm text-[#637066]">No match rules added.</p>
+                    <p className="mt-4 text-sm text-[#637066]">No solver constraints added.</p>
                   )}
                 </section>
+
               </>
             ) : null}
           </div>
@@ -614,7 +598,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
               label="Match duration"
               value={`${editableLeague.matchDurationMinutes || 0} min`}
             />
-            <SummaryMetric icon={ListChecks} label="Rules" value={rules.length} />
+            <SummaryMetric icon={ListChecks} label="Rules" value={editableLeague.schedulerRules.length} />
           </aside>
         </section>
       </div>

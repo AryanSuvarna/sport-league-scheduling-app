@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, CalendarRange, Clock3, ListChecks, Users } from "lucide-react";
+import { ArrowLeft, ArrowRight, Clock3, ListChecks, Users } from "lucide-react";
 import { formatSeason, type League } from "@/lib/leagues";
 import { createClient } from "@/lib/supabase/server";
 
@@ -15,8 +15,7 @@ export default async function LeaguesPage() {
         season_start_date,
         season_end_date,
         match_duration_minutes,
-        max_matches_per_team_per_week,
-        match_rules,
+        scheduler_rules,
         league_teams (
           id,
           name,
@@ -101,12 +100,7 @@ export default async function LeaguesPage() {
                   label="Duration"
                   value={`${league.match_duration_minutes} min`}
                 />
-                <LeagueStat
-                  icon={CalendarRange}
-                  label="Weekly max"
-                  value={league.max_matches_per_team_per_week}
-                />
-                <LeagueStat icon={ListChecks} label="Rules" value={league.match_rules.length} />
+                <LeagueStat icon={ListChecks} label="Rules" value={league.scheduler_rules.length} />
               </div>
             </article>
           ))}

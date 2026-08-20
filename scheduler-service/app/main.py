@@ -51,6 +51,9 @@ class ScheduleRequest(BaseModel):
     slots: list[Slot] = Field(min_length=1)
     settings: ScheduleSettings = Field(default_factory=ScheduleSettings)
     fixed_matches: list[FixedMatch] = Field(default_factory=list)
+    # Dates are ISO calendar dates in the league's local schedule timezone.
+    excluded_dates: list[date] = Field(default_factory=list)
+    soft_avoid_dates: list[date] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def identifiers_must_be_unique(self):
@@ -145,6 +148,8 @@ def build_schedule(request: ScheduleRequest) -> ScheduleResponse:
             None if second.allowed_slot_ids is None else set(second.allowed_slot_ids)
         )
         for slot_index, slot in enumerate(request.slots):
+            if slot.starts_at.date() in request.excluded_dates:
+                continue
             if (first_allowed is not None and slot.id not in first_allowed) or (
                 second_allowed is not None and slot.id not in second_allowed
             ):
@@ -169,6 +174,8 @@ def build_schedule(request: ScheduleRequest) -> ScheduleResponse:
                     preference_penalties.append(variable * 1_000)
                 if second.preferred_slot_ids and slot.id not in second.preferred_slot_ids:
                     preference_penalties.append(variable * 1_000)
+                if slot.starts_at.date() in request.soft_avoid_dates:
+                    preference_penalties.append(variable * 10_000)
                 preference_penalties.append(variable * slot_index)
         if not fixture_variables:
             raise ValueError(
