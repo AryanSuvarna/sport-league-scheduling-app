@@ -1,4 +1,7 @@
+import { createHash, randomBytes } from "crypto";
+import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 
 type InviteRequestBody = {
   captainName?: string;
@@ -15,6 +18,9 @@ const requiredEnvVars = [
 ] as const;
 
 export async function POST(request: NextRequest) {
+  const { isAuthenticated } = await auth();
+  if (!isAuthenticated) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const missingEnvVars = requiredEnvVars.filter((envVar) => !process.env[envVar]);
 
   if (missingEnvVars.length > 0) {
@@ -45,24 +51,60 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  const captainName = body.captainName?.trim();
-  const captainPhone = normalizePhoneNumber(body.captainPhone || "");
   const leagueId = body.leagueId?.trim();
   const teamId = body.teamId?.trim();
-  const teamName = body.teamName?.trim();
-  const leagueName = body.leagueName?.trim();
 
-  if (!captainName || !captainPhone || !leagueId || !teamId || !teamName || !leagueName) {
+  if (!leagueId || !teamId) {
     return NextResponse.json(
-      { error: "Captain name, phone, league ID, team ID, team name, and league name are required." },
+      { error: "League ID and team ID are required." },
       { status: 400 },
     );
   }
 
-  const inviteUrl = buildInviteUrl(request, {
-    leagueId,
-    teamId,
+  const supabase = await createClient();
+  const [{ data: league }, { data: team }] = await Promise.all([
+    supabase.from("leagues").select("id, name").eq("id", leagueId).maybeSingle(),
+    supabase
+      .from("league_teams")
+      .select("id, league_id, name, captain_name, captain_phone")
+      .eq("id", teamId)
+      .maybeSingle(),
+  ]);
+  if (!league || !team || team.league_id !== league.id) {
+    return NextResponse.json({ error: "League or team not found." }, { status: 404 });
+  }
+
+  const token = randomBytes(32).toString("base64url");
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const ttlDays = Math.max(1, Number.parseInt(process.env.TEAM_CAPTAIN_INVITE_TTL_DAYS || "30", 10) || 30);
+  const expiresAt = new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000).toISOString();
+
+  await supabase
+    .from("team_captain_invites")
+    .update({ revoked_at: new Date().toISOString() })
+    .eq("team_id", team.id)
+    .is("revoked_at", null);
+
+  const { error: inviteError } = await supabase.from("team_captain_invites").insert({
+    league_id: league.id,
+    team_id: team.id,
+    token_hash: tokenHash,
+    expires_at: expiresAt,
   });
+  if (inviteError) return NextResponse.json({ error: inviteError.message }, { status: 500 });
+
+  const captainName = team.captain_name;
+  const captainPhone = normalizePhoneNumber(team.captain_phone);
+  const teamName = team.name;
+  const leagueName = league.name;
+  const inviteUrl = buildInviteUrl(request, {
+    token,
+  });
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`Team captain invite for ${teamName}: ${inviteUrl}`);
+  }
+
   const apiVersion =
     process.env.WHATSAPP_API_VERSION || process.env.WHATSAPP_GRAPH_API_VERSION || "v25.0";
   const language =
@@ -126,8 +168,7 @@ function normalizePhoneNumber(phoneNumber: string) {
 function buildInviteUrl(
   request: NextRequest,
   params: {
-    leagueId: string;
-    teamId: string;
+    token: string;
   },
 ) {
   const baseUrl =
@@ -136,8 +177,7 @@ function buildInviteUrl(
     request.nextUrl.origin;
   const inviteUrl = new URL("/team-captain", baseUrl);
 
-  inviteUrl.searchParams.set("leagueId", params.leagueId);
-  inviteUrl.searchParams.set("teamId", params.teamId);
+  inviteUrl.searchParams.set("token", params.token);
 
   return inviteUrl.toString();
 }

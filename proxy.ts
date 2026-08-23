@@ -5,6 +5,7 @@ const isPublicPath = (pathname: string) =>
   pathname.startsWith("/sign-up") ||
   pathname.startsWith("/team-captain") ||
   pathname === "/api/whatsapp" ||
+  pathname === "/api/team-captain/invite" ||
   pathname === "/api/webhooks/clerk";
 
 export default clerkMiddleware(async (auth, request) => {

@@ -16,7 +16,6 @@ import {
   Send,
   Trash2,
 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import { toast } from "react-hot-toast";
 
 type Weekday =
@@ -90,20 +89,6 @@ const initialForm: TeamCaptainForm = {
   notes: "",
 };
 
-function getInitialForm() {
-  if (typeof window === "undefined") {
-    return initialForm;
-  }
-
-  const searchParams = new URLSearchParams(window.location.search);
-
-  return {
-    ...initialForm,
-    leagueId: searchParams.get("leagueId") || "",
-    teamId: searchParams.get("teamId") || "",
-  };
-}
-
 function compactDates(dates: string[]) {
   return dates.filter(Boolean);
 }
@@ -118,62 +103,64 @@ function subscribeToLocation() {
   return () => {};
 }
 
-function getInviteLockSnapshot() {
+function getInviteTokenSnapshot() {
   if (typeof window === "undefined") {
-    return true;
+    return null;
   }
 
-  const searchParams = new URLSearchParams(window.location.search);
-  return Boolean(searchParams.get("leagueId") && searchParams.get("teamId"));
+  return new URLSearchParams(window.location.search).get("token");
 }
 
-function getInviteLockServerSnapshot() {
-  return true;
+function getInviteTokenServerSnapshot() {
+  return null;
 }
 
 export default function TeamCaptainPage() {
-  const supabase = useMemo(() => createClient(), []);
-  const [form, setForm] = useState<TeamCaptainForm>(getInitialForm);
+  const [form, setForm] = useState<TeamCaptainForm>(initialForm);
   const [isSaving, setIsSaving] = useState(false);
-  const [leagues, setLeagues] = useState<League[]>([]);
-  const [isLoadingLeagues, setIsLoadingLeagues] = useState(true);
-  const isInviteLink = useSyncExternalStore(
+  const [league, setLeague] = useState<League | null>(null);
+  const [isInviteLoading, setIsInviteLoading] = useState(true);
+  const inviteToken = useSyncExternalStore(
     subscribeToLocation,
-    getInviteLockSnapshot,
-    getInviteLockServerSnapshot,
+    getInviteTokenSnapshot,
+    getInviteTokenServerSnapshot,
   );
+  const isLoadingInvite = Boolean(inviteToken) && isInviteLoading;
 
   const availableDates = compactDates(form.availableDates);
   const blackoutDates = compactDates(form.blackoutDates);
   const hasAvailabilityRange = form.availableStartDate && form.availableEndDate;
   const hasAvailableDates = availableDates.length > 0;
-  const selectedLeague = useMemo(
-    () => leagues.find((league) => league.id === form.leagueId) ?? null,
-    [form.leagueId, leagues],
-  );
+  const selectedLeague = league;
   const selectedTeam = useMemo(
     () => selectedLeague?.league_teams.find((team) => team.id === form.teamId) ?? null,
     [form.teamId, selectedLeague],
   );
 
   useEffect(() => {
-    async function loadLeagues() {
-      const { data, error } = await supabase
-        .from("leagues")
-        .select("id, name, sport, season_start_date, season_end_date, league_teams(id, name, captain_name, captain_email)")
-        .order("name", { ascending: true });
+    const token = inviteToken;
+    if (!token) {
+      return;
+    }
+    const activeToken: string = token;
 
-      if (error) {
-        toast.error(`Could not load leagues: ${error.message}`);
+    async function loadInvite() {
+      const response = await fetch(`/api/team-captain/invite?token=${encodeURIComponent(activeToken)}`);
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok || !payload?.league || !payload?.team) {
+        toast.error(payload?.error || "This invitation is invalid or expired.");
       } else {
-        setLeagues((data ?? []) as League[]);
+        const inviteLeague: League = { ...payload.league, league_teams: [payload.team] };
+        setLeague(inviteLeague);
+        setForm((current) => ({ ...current, leagueId: inviteLeague.id, teamId: payload.team.id }));
       }
 
-      setIsLoadingLeagues(false);
+      setIsInviteLoading(false);
     }
 
-    void loadLeagues();
-  }, [supabase]);
+    void loadInvite();
+  }, [inviteToken]);
 
   function updateField(field: keyof TeamCaptainForm, value: string) {
     setForm((currentForm) => ({
@@ -355,34 +342,35 @@ export default function TeamCaptainPage() {
 
     setIsSaving(true);
 
-    const { error } = await supabase.from("team_availability_submissions").insert({
-      team_id: selectedTeam!.id,
-      available_start_date: form.availableStartDate || null,
-      available_end_date: form.availableEndDate || null,
-      available_dates: availableDates,
-      has_day_preference: form.hasDayPreference,
-      preferred_days_of_week: form.preferredDaysOfWeek,
-      has_time_preference: form.hasTimePreference,
-      preferred_times_of_day: form.preferredTimesOfDay,
-      blackout_dates: blackoutDates,
-      recurring_blackouts: form.recurringBlackouts.map((blackout) => ({
-        day_of_week: blackout.dayOfWeek,
-        time_of_day: blackout.timeOfDay,
-      })),
-      notes: form.notes.trim(),
+    const response = await fetch("/api/team-captain/invite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: inviteToken,
+        availableStartDate: form.availableStartDate || null,
+        availableEndDate: form.availableEndDate || null,
+        availableDates,
+        hasDayPreference: form.hasDayPreference,
+        preferredDaysOfWeek: form.preferredDaysOfWeek,
+        hasTimePreference: form.hasTimePreference,
+        preferredTimesOfDay: form.preferredTimesOfDay,
+        blackoutDates,
+        recurringBlackouts: form.recurringBlackouts.map((blackout) => ({
+          day_of_week: blackout.dayOfWeek,
+          time_of_day: blackout.timeOfDay,
+        })),
+        notes: form.notes.trim(),
+      }),
     });
+    const payload = await response.json().catch(() => null);
 
-    if (error) {
-      toast.error(`Could not submit availability: ${error.message}`);
+    if (!response.ok) {
+      toast.error(`Could not submit availability: ${payload?.error || "Please try again."}`);
       setIsSaving(false);
       return;
     }
 
-    setForm((currentForm) =>
-      isInviteLink
-        ? { ...initialForm, leagueId: currentForm.leagueId, teamId: currentForm.teamId }
-        : initialForm,
-    );
+    setForm({ ...initialForm, leagueId: selectedLeague!.id, teamId: selectedTeam!.id });
     toast.success("Availability submitted.");
     setIsSaving(false);
   }
@@ -418,52 +406,30 @@ export default function TeamCaptainPage() {
               <h2 className="text-lg font-semibold text-[#16211b]">Team details</h2>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
-                League
-                <select
-                  value={form.leagueId}
-                  onChange={(event) =>
-                    setForm((currentForm) => ({
-                      ...currentForm,
-                      leagueId: event.target.value,
-                      teamId: "",
-                    }))
-                  }
-                  required
-                  disabled={isInviteLink}
-                  className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20 disabled:cursor-not-allowed disabled:bg-[#f1f4ef] disabled:text-[#58635c]"
-                >
-                  <option value="">{isLoadingLeagues ? "Loading leagues..." : "Choose a league"}</option>
-                  {leagues.map((league) => (
-                    <option key={league.id} value={league.id}>
-                      {league.name} · {league.sport}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            {isLoadingInvite ? (
+              <p className="text-sm text-[#58635c]">Loading your invitation…</p>
+            ) : null}
 
-              <label className="grid gap-2 text-sm font-medium text-[#2f3d34]">
-                Team
-                <select
-                  value={form.teamId}
-                  onChange={(event) => updateField("teamId", event.target.value)}
-                  required
-                  disabled={!selectedLeague || isInviteLink}
-                  className="h-11 rounded-md border border-[#cbd5cf] bg-white px-3 text-base text-[#16211b] outline-none transition placeholder:text-[#8a968f] focus:border-[#1f5b47] focus:ring-2 focus:ring-[#1f5b47]/20 disabled:cursor-not-allowed disabled:bg-[#f1f4ef] disabled:text-[#58635c]"
-                >
-                  <option value="">{selectedLeague ? "Choose your team" : "Choose a league first"}</option>
-                  {selectedLeague?.league_teams.map((team) => (
-                    <option key={team.id} value={team.id}>{team.name}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            {!isLoadingInvite && !inviteToken ? (
+              <p className="rounded-md border border-[#e1c3bd] bg-[#fff8f7] p-3 text-sm text-[#8a3829]">
+                This page is available only through a team invitation link.
+              </p>
+            ) : null}
 
             {selectedLeague ? (
               <div className="rounded-md border border-[#d6ded5] bg-[#f7faf5] px-3 py-2 text-sm font-medium text-[#405047]">
-                League season: <span className="text-[#16211b]">{selectedLeague.season_start_date} to {selectedLeague.season_end_date}</span>
-                {selectedTeam ? <span className="block mt-1 text-xs">Captain: {selectedTeam.captain_name}{selectedTeam.captain_email ? ` · ${selectedTeam.captain_email}` : ""}</span> : null}
+                <p>
+                  League: <span className="text-[#16211b]">{selectedLeague.name}</span>
+                </p>
+                {selectedTeam ? (
+                  <p className="mt-1">
+                    Team: <span className="text-[#16211b]">{selectedTeam.name}</span>
+                  </p>
+                ) : null}
+                <p className="mt-1">
+                  League season: <span className="text-[#16211b]">{selectedLeague.season_start_date} to {selectedLeague.season_end_date}</span>
+                </p>
+                {selectedTeam ? <p className="mt-1 text-xs">Captain: {selectedTeam.captain_name}{selectedTeam.captain_email ? ` · ${selectedTeam.captain_email}` : ""}</p> : null}
               </div>
             ) : null}
           </section>
@@ -743,9 +709,7 @@ export default function TeamCaptainPage() {
               type="button"
               onClick={() => {
                 setForm((currentForm) =>
-                  isInviteLink
-                    ? { ...initialForm, leagueId: currentForm.leagueId, teamId: currentForm.teamId }
-                    : initialForm,
+                  ({ ...initialForm, leagueId: currentForm.leagueId, teamId: currentForm.teamId }),
                 );
               }}
               className="h-11 rounded-md border border-[#cad4cc] px-5 text-sm font-semibold text-[#405047] transition hover:bg-[#f1f4ef] focus:outline-none focus:ring-2 focus:ring-[#9aa79f] focus:ring-offset-2"
