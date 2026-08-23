@@ -28,7 +28,7 @@ export default function RootLayout({
     <html lang="en" className={cn("h-full antialiased", "font-sans", geist.variable)}>
       <body className="min-h-full flex flex-col">
         <ClerkProvider appearance={{ theme: shadcn }}>
-          <div className="absolute right-4 top-4 z-10">
+          <div className="app-auth absolute right-4 top-4 z-10">
             <Show when="signed-out">
               <div className="flex items-center gap-2">
                 <SignInButton>

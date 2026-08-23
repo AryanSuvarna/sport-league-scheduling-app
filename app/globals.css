@@ -170,3 +170,15 @@
     @apply font-sans;
   }
 }
+
+/* The public landing page owns its navigation and authentication actions. */
+body:has(.landing-page) .app-auth,
+body:has(.landing-page) > footer {
+  display: none;
+}
+
+.landing-grid {
+  background-image: linear-gradient(rgba(214, 255, 118, 0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(214, 255, 118, 0.18) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: linear-gradient(to bottom, black, transparent 85%);
+}
