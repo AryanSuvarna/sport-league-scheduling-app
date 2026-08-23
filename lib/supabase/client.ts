@@ -1,8 +1,16 @@
-import { createBrowserClient } from '@supabase/ssr'
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
-export function createClient() {
-  return createBrowserClient(
+type AccessToken = () => Promise<string | null>;
+
+export function createClient(accessToken?: AccessToken) {
+  return createSupabaseClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
-  )
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    {
+      accessToken: async () => {
+        if (typeof window === "undefined") return null;
+        return accessToken?.() ?? null;
+      },
+    },
+  );
 }

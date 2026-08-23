@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useAuth } from "@clerk/nextjs";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "react-hot-toast";
 import type {
@@ -67,7 +68,8 @@ type LeagueOption = {
 };
 
 export function useVenueAvailability() {
-  const supabase = useMemo(() => createClient(), []);
+  const { getToken } = useAuth();
+  const supabase = useMemo(() => createClient(getToken), [getToken]);
   const [availabilities, setAvailabilities] = useState<Availability[]>([]);
   const [venues, setVenues] = useState<Venue[]>([]);
   const [fields, setFields] = useState<Field[]>([]);

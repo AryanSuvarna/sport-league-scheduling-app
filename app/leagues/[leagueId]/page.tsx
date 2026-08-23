@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { auth } from "@clerk/nextjs/server";
 import { LeagueDetailClient } from "./LeagueDetailClient";
 import type { League } from "@/lib/leagues";
 import { createClient } from "@/lib/supabase/server";
@@ -11,7 +12,19 @@ type LeaguePageProps = {
 
 export default async function LeaguePage({ params }: LeaguePageProps) {
   const { leagueId } = await params;
+  const { isAuthenticated, userId } = await auth();
+  if (!isAuthenticated || !userId) notFound();
+
   const supabase = await createClient();
+  const { data: leagueOwner } = await supabase
+    .from("leagues")
+    .select("id")
+    .eq("id", leagueId)
+    .eq("owner_clerk_user_id", userId)
+    .maybeSingle();
+
+  if (!leagueOwner) notFound();
+
   const { data: league, error } = await supabase
     .from("leagues")
     .select(

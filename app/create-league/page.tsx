@@ -12,7 +12,6 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import { SchedulerRuleBuilder } from "@/components/SchedulerRuleBuilder";
 import { parseSchedulerRules, withWeeklyMatchLimit, type SchedulerRule } from "@/lib/scheduling/rules";
 import { toast } from "react-hot-toast";
@@ -197,46 +196,39 @@ export default function CreateLeaguePage() {
 
     setIsSaving(true);
 
-    const supabase = createClient();
-    const { data: league, error: leagueError } = await supabase
-      .from("leagues")
-      .insert({
-        name: form.leagueName.trim(),
-        sport: form.sport.trim(),
-        season_start_date: form.seasonStartDate,
-        season_end_date: form.seasonEndDate,
-        match_duration_minutes: Number(form.matchDurationMinutes),
-        scheduler_rules: form.schedulerRules,
-      })
-      .select("id")
-      .single();
+    const response = await fetch("/api/leagues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        league: {
+          name: form.leagueName,
+          sport: form.sport,
+          seasonStartDate: form.seasonStartDate,
+          seasonEndDate: form.seasonEndDate,
+          matchDurationMinutes: Number(form.matchDurationMinutes),
+          schedulerRules: form.schedulerRules,
+        },
+        teams: completeTeams.map((team) => ({
+          name: team.teamName,
+          captainName: team.captainName,
+          captainPhone: team.captainPhone,
+          captainEmail: team.captainEmail,
+        })),
+      }),
+    });
+    const result = (await response.json().catch(() => null)) as
+      | { leagueId?: string; error?: string }
+      | null;
 
-    if (leagueError || !league) {
+    if (!response.ok || !result?.leagueId) {
       setIsSaving(false);
-      toast.error(leagueError?.message || "Could not create the league.");
-      return;
-    }
-
-    const { error: teamsError } = await supabase.from("league_teams").insert(
-      completeTeams.map((team) => ({
-        league_id: league.id,
-        name: team.teamName.trim(),
-        captain_name: team.captainName.trim(),
-        captain_phone: team.captainPhone.trim(),
-        captain_email: team.captainEmail.trim() || null,
-      })),
-    );
-
-    if (teamsError) {
-      await supabase.from("leagues").delete().eq("id", league.id);
-      setIsSaving(false);
-      toast.error(teamsError.message);
+      toast.error(result?.error || "Could not create the league.");
       return;
     }
 
     setIsSaving(false);
     setIsCreated(true);
-    setCreatedLeagueId(league.id);
+    setCreatedLeagueId(result.leagueId);
     toast.success("League created. Venue availability can be added later from the league page.");
     router.refresh();
   }

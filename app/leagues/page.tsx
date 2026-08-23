@@ -1,9 +1,13 @@
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, Clock3, ListChecks, Users } from "lucide-react";
 import { formatSeason, type League } from "@/lib/leagues";
+import { auth } from "@clerk/nextjs/server";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function LeaguesPage() {
+  const { isAuthenticated, userId } = await auth();
+  if (!isAuthenticated || !userId) return null;
+
   const supabase = await createClient();
   const { data: leagues, error } = await supabase
     .from("leagues")
@@ -25,8 +29,10 @@ export default async function LeaguesPage() {
         )
       `,
     )
+    .eq("owner_clerk_user_id", userId)
     .order("created_at", { ascending: false })
     .returns<League[]>();
+  const displayError = error;
 
   return (
     <main className="min-h-screen bg-[#f6f7f4] text-[#18211c]">
@@ -55,13 +61,13 @@ export default async function LeaguesPage() {
           </div>
         </header>
 
-        {error ? (
+        {displayError ? (
           <p className="rounded-md border border-[#e1c3bd] bg-white p-5 text-sm text-[#9a3d31] shadow-sm">
-            {error.message}
+            {displayError.message}
           </p>
         ) : null}
 
-        {!error && leagues?.length === 0 ? (
+        {!displayError && leagues?.length === 0 ? (
           <section className="rounded-md border border-[#d6ded5] bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-[#16211b]">No leagues yet</h2>
             <p className="mt-2 text-sm leading-6 text-[#637066]">

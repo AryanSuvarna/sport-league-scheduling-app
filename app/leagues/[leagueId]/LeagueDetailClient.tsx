@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 import { type ChangeEvent, useState } from "react";
 import {
   ArrowLeft,
@@ -37,6 +38,7 @@ type EditableTeam = {
 
 export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
   const router = useRouter();
+  const { getToken } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleteConfirmationOpen, setIsDeleteConfirmationOpen] = useState(false);
@@ -176,7 +178,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
 
     setIsSaving(true);
 
-    const supabase = createClient();
+    const supabase = createClient(getToken);
     const { error: leagueError } = await supabase
       .from("leagues")
       .update({
@@ -266,7 +268,7 @@ export function LeagueDetailClient({ league }: LeagueDetailClientProps) {
   async function deleteLeague() {
     setIsSaving(true);
 
-    const supabase = createClient();
+    const supabase = createClient(getToken);
     const { error } = await supabase.from("leagues").delete().eq("id", league.id);
 
     setIsSaving(false);
