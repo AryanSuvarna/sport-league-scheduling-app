@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { SignInButton, SignUpButton } from "@clerk/nextjs";
+import { Show, SignInButton, SignOutButton, SignUpButton, UserButton } from "@clerk/nextjs";
 import { ArrowRight, CalendarDays, Check, ChevronRight, Clock3, MapPin, ShieldCheck, Sparkles, UsersRound, WandSparkles } from "lucide-react";
 
 const features = [
@@ -18,8 +18,20 @@ export default function Home() {
         <div className="relative mx-auto max-w-7xl px-5 sm:px-8">
           <nav className="flex items-center justify-between py-6 sm:py-8" aria-label="Main navigation">
             <Link href="/" className="flex items-center gap-2.5" aria-label="LeagueFlow home"><span className="grid h-9 w-9 place-items-center rounded-xl bg-[#d6ff76] text-[#102b24] shadow-[0_0_30px_rgba(214,255,118,0.25)]"><span className="text-lg font-black leading-none">L</span></span><span className="text-lg font-semibold tracking-[-0.04em]">LeagueFlow</span></Link>
-            <div className="hidden items-center gap-7 text-sm font-medium text-white/70 md:flex"><a className="transition hover:text-white" href="#how-it-works">How it works</a><a className="transition hover:text-white" href="#features">Why LeagueFlow</a><Link className="transition hover:text-white" href="/leagues">Your leagues</Link></div>
-            <div className="flex items-center gap-2"><SignInButton><button className="rounded-full px-3 py-2 text-sm font-semibold text-white/90 transition hover:bg-white/10 sm:px-4">Sign in</button></SignInButton><SignUpButton><button className="inline-flex items-center gap-1.5 rounded-full bg-[#d6ff76] px-4 py-2.5 text-sm font-bold text-[#102b24] transition hover:bg-[#e3ff9b] sm:px-5">Get started <ArrowRight className="h-3.5 w-3.5" /></button></SignUpButton></div>
+            <div className="hidden items-center gap-7 text-sm font-medium text-white/70 md:flex"><a className="transition hover:text-white" href="#how-it-works">How it works</a><a className="transition hover:text-white" href="#features">Why LeagueFlow</a><Show when="signed-out"><Link className="transition hover:text-white" href="/leagues">Your leagues</Link></Show></div>
+            <div className="flex items-center gap-1 sm:gap-2">
+              <Show when="signed-out">
+                <SignInButton><button className="rounded-full px-3 py-2 text-sm font-semibold text-white/90 transition hover:bg-white/10 sm:px-4">Sign in</button></SignInButton>
+                <SignUpButton><button className="inline-flex items-center gap-1.5 rounded-full bg-[#d6ff76] px-4 py-2.5 text-sm font-bold text-[#102b24] transition hover:bg-[#e3ff9b] sm:px-5">Get started <ArrowRight className="h-3.5 w-3.5" /></button></SignUpButton>
+              </Show>
+              <Show when="signed-in">
+                <Link href="/leagues" className="inline-flex items-center rounded-full bg-[#d6ff76] px-3 py-2 text-sm font-bold text-[#102b24] transition hover:bg-[#e3ff9b] sm:px-4"><span className="sm:hidden">Leagues</span><span className="hidden sm:inline">Your leagues</span></Link>
+                <UserButton />
+                <SignOutButton redirectUrl="/">
+                  <button className="rounded-full px-2 py-2 text-sm font-semibold text-white/90 transition hover:bg-white/10 sm:px-4">Sign out</button>
+                </SignOutButton>
+              </Show>
+            </div>
           </nav>
           <div className="grid items-center gap-14 pt-14 lg:grid-cols-[1fr_0.9fr] lg:gap-20 lg:pt-20">
             <div className="max-w-2xl">

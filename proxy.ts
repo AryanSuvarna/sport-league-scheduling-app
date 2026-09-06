@@ -1,6 +1,7 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
 
 const isPublicPath = (pathname: string) =>
+  pathname === "/" ||
   pathname.startsWith("/sign-in") ||
   pathname.startsWith("/sign-up") ||
   pathname.startsWith("/team-captain") ||
