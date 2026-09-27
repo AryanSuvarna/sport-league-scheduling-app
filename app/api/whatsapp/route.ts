@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { createHmac, timingSafeEqual } from "crypto";
+import { NextResponse } from "next/server";
 
 // 1. Webhook Verification (Meta sends a GET request to verify your endpoint)
 export async function GET(request: Request) {
@@ -9,39 +10,57 @@ export async function GET(request: Request) {
   const challenge = searchParams.get('hub.challenge');
 
   // Compare this with the custom verification token you set in Meta's dashboard
-  const MY_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
+  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
 
-  if (mode === 'subscribe' && token === MY_VERIFY_TOKEN) {
+  if (mode === "subscribe" && verifyToken && token === verifyToken && challenge) {
     // Return the exact challenge string as plain text with a 200 status
     return new NextResponse(challenge, { status: 200 });
   }
 
-  return new NextResponse('Verification failed', { status: 403 });
+  return new NextResponse("Verification failed", { status: 403 });
 }
 
 // 2. Receiving Messages (Meta sends a POST request when events happen)
 export async function POST(request: Request) {
+  const appSecret = process.env.WHATSAPP_APP_SECRET;
+  const signature = request.headers.get("x-hub-signature-256");
+  const rawBody = await request.text();
+
+  if (!appSecret || !signature || !isValidSignature(rawBody, signature, appSecret)) {
+    return NextResponse.json({ error: "Invalid webhook signature" }, { status: 401 });
+  }
+
   try {
-    const body = await request.json();
+    const body = JSON.parse(rawBody);
 
     // Ensure it is a valid WhatsApp webhook payload
-    if (body.object === 'whatsapp_business_account') {
+    if (body.object === "whatsapp_business_account") {
       const entry = body.entry?.[0];
       const changes = entry?.changes?.[0];
       const value = changes?.value;
       const message = value?.messages?.[0];
 
       if (message) {
-        console.log('New Message Received:', message);
+        console.log("New Message Received:", message);
         // Process message logic here (e.g., save to DB, trigger AI reply)
       }
 
       // Always return 200 OK quickly so Meta doesn't retry the notification
-      return NextResponse.json({ status: 'success' }, { status: 200 });
+      return NextResponse.json({ status: "success" }, { status: 200 });
     }
 
-    return NextResponse.json({ error: 'Not a WhatsApp event' }, { status: 404 });
+    return NextResponse.json({ error: "Not a WhatsApp event" }, { status: 404 });
   } catch {
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ error: "Invalid WhatsApp webhook payload" }, { status: 400 });
   }
+}
+
+function isValidSignature(rawBody: string, signature: string, appSecret: string) {
+  const expectedSignature = `sha256=${createHmac("sha256", appSecret)
+    .update(rawBody)
+    .digest("hex")}`;
+  const expected = Buffer.from(expectedSignature);
+  const received = Buffer.from(signature);
+
+  return expected.length === received.length && timingSafeEqual(expected, received);
 }

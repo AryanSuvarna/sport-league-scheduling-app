@@ -377,7 +377,7 @@ export default function TeamCaptainPage() {
 
   if (isLoadingInvite) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f6f7f4] px-4 text-sm text-[#58635c]">
+      <main className="team-captain-page flex min-h-screen items-center justify-center bg-[#f6f7f4] px-4 text-sm text-[#58635c]">
         Loading invitation…
       </main>
     );
@@ -385,7 +385,7 @@ export default function TeamCaptainPage() {
 
   if (!inviteToken || !selectedLeague || !selectedTeam) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f6f7f4] px-4 text-center text-[#1b241f]">
+      <main className="team-captain-page flex min-h-screen items-center justify-center bg-[#f6f7f4] px-4 text-center text-[#1b241f]">
         <section className="max-w-md rounded-lg border border-[#e1c3bd] bg-white p-6 shadow-sm">
           <h1 className="text-xl font-semibold">Invitation unavailable</h1>
           <p className="mt-2 text-sm leading-6 text-[#58635c]">
@@ -397,7 +397,7 @@ export default function TeamCaptainPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f6f7f4] text-[#1b241f]">
+    <main className="team-captain-page min-h-screen bg-[#f6f7f4] text-[#1b241f]">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-7 px-4 py-6 sm:px-6 lg:px-8">
         <header className="flex flex-col gap-4 border-b border-[#d6ded5] pb-6">
           <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-[#637066]">

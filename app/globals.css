@@ -177,6 +177,11 @@ body:has(.landing-page) > footer {
   display: none;
 }
 
+/* Team-captain invitation pages are public forms, not account pages. */
+body:has(.team-captain-page) .app-auth {
+  display: none;
+}
+
 .landing-grid {
   background-image: linear-gradient(rgba(214, 255, 118, 0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(214, 255, 118, 0.18) 1px, transparent 1px);
   background-size: 56px 56px;

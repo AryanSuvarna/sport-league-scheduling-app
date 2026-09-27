@@ -20,6 +20,31 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## WhatsApp production setup
+
+Set the production domain to `https://suvsolution.com` in the host's environment
+variables:
+
+```text
+NEXT_PUBLIC_APP_URL=https://suvsolution.com
+WHATSAPP_APP_BASE_URL=https://suvsolution.com
+```
+
+Copy the remaining WhatsApp variables from `env.example` into the production
+environment. Use a permanent system-user access token, not a temporary Meta
+testing token.
+
+In the Meta App Dashboard, configure WhatsApp webhooks as follows:
+
+- Callback URL: `https://suvsolution.com/api/whatsapp`
+- Verify token: the exact `WHATSAPP_VERIFY_TOKEN` value configured in production
+- Subscribe the WhatsApp Business Account to the message events your app needs
+
+`WHATSAPP_APP_SECRET` is required: the webhook verifies Meta's
+`X-Hub-Signature-256` before accepting a request. In Meta, set the WhatsApp app,
+business account, and phone number to live/production mode, and ensure the
+invite template is approved before sending live messages.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
